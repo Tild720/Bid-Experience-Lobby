@@ -809,7 +809,7 @@ local roomStart = roomFrame:WaitForChild("Start")
 local roomBack = roomPanel:WaitForChild("Back")
 local memberParent = roomFrame:WaitForChild("MemberParent")
 local roomCards = {}
-local roomCardsTransparency = 0
+local roomCardsTransparency = 1
 local currentRoom
 local roomConnections = {}
 local tweenRoomCardsTransparency
@@ -1130,6 +1130,17 @@ local function tweenStoredTransparency(instance, propertyName, transparency)
 	tween(instance, properties)
 end
 
+local function setStoredTransparency(instance, propertyName, transparency)
+	local attributeName = "RoomBase" .. propertyName
+	local baseTransparency = instance:GetAttribute(attributeName)
+	if baseTransparency == nil then
+		baseTransparency = instance[propertyName]
+		instance:SetAttribute(attributeName, baseTransparency)
+	end
+
+	instance[propertyName] = if transparency >= 1 then 1 else baseTransparency
+end
+
 local function tweenRoomCardTransparency(card, transparency)
 	local function apply(instance)
 		if instance:IsA("GuiButton") then
@@ -1146,6 +1157,31 @@ local function tweenRoomCardTransparency(card, transparency)
 			tweenStoredTransparency(instance, "ImageTransparency", transparency)
 		elseif instance:IsA("UIStroke") then
 			tweenStoredTransparency(instance, "Transparency", transparency)
+		end
+	end
+
+	apply(card)
+	for _, instance in card:GetDescendants() do
+		apply(instance)
+	end
+end
+
+local function setRoomCardTransparency(card, transparency)
+	local function apply(instance)
+		if instance:IsA("GuiButton") then
+			instance.Interactable = transparency < 1
+		end
+
+		if instance:IsA("GuiObject") then
+			setStoredTransparency(instance, "BackgroundTransparency", transparency)
+		end
+
+		if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+			setStoredTransparency(instance, "TextTransparency", transparency)
+		elseif instance:IsA("ImageLabel") or instance:IsA("ImageButton") then
+			setStoredTransparency(instance, "ImageTransparency", transparency)
+		elseif instance:IsA("UIStroke") then
+			setStoredTransparency(instance, "Transparency", transparency)
 		end
 	end
 
@@ -1173,10 +1209,10 @@ local function renderRoom(room)
 	card.Name = room.Name
 	card.LayoutOrder = room:GetAttribute("CreatedOrder") or #roomList:GetChildren()
 	card.Visible = true
+	setRoomCardTransparency(card, roomCardsTransparency)
 	card.Parent = roomList
 	roomCards[room] = card
 	updateRoomCard(room, card)
-	tweenRoomCardTransparency(card, roomCardsTransparency)
 
 	if card:IsA("GuiButton") then
 		card.Activated:Connect(function()
