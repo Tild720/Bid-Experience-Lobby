@@ -192,10 +192,18 @@ startRoomEvent.OnServerEvent:Connect(function(player, roomName)
 	end
 
 	local players = {}
+	local memberData = {}
+	local memberNames = {}
 	for _, member in members:GetChildren() do
 		local memberPlayer = Players:GetPlayerByUserId(member:GetAttribute("UserId"))
 		if memberPlayer then
 			table.insert(players, memberPlayer)
+			table.insert(memberData, {
+				UserId = memberPlayer.UserId,
+				Name = memberPlayer.Name,
+				IsOwner = member:GetAttribute("IsOwner") == true,
+			})
+			table.insert(memberNames, memberPlayer.Name)
 		end
 	end
 
@@ -212,7 +220,12 @@ startRoomEvent.OnServerEvent:Connect(function(player, roomName)
 		PasswordEnabled = room:GetAttribute("PasswordEnabled"),
 		VoiceOnly = room:GetAttribute("VoiceOnly"),
 		OwnerUserId = room:GetAttribute("OwnerUserId"),
+		Members = memberData,
 	}
+
+	print(
+		`Starting room "{teleportData.RoomName}" | players {#players}/{teleportData.Capacity} ({table.concat(memberNames, ", ")}) | round={teleportData.Round}, theme={teleportData.Theme}, mode={teleportData.Mode}, voiceOnly={teleportData.VoiceOnly}`
+	)
 
 	TeleportService:TeleportPartyAsync(GAME_PLACE_ID, players, teleportData)
 end)
