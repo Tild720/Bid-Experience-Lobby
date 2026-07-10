@@ -374,6 +374,8 @@ local roomList = mainGui:WaitForChild("Play"):WaitForChild("Frame"):WaitForChild
 local roomPanel = mainGui:WaitForChild("Room")
 local roomFrame = roomPanel:WaitForChild("Frame")
 local roomStart = roomFrame:WaitForChild("Start")
+local roomStartFrame = roomStart:FindFirstChild("Frame")
+local roomDesc = roomFrame:FindFirstChild("Desc")
 local roomBack = roomPanel:WaitForChild("Back")
 local memberParent = roomFrame:WaitForChild("MemberParent")
 local roomCards = {}
@@ -569,11 +571,60 @@ local function renderMembers(room)
 	end
 end
 
+local function getRoomStartReady(room)
+	return room:GetAttribute("OwnerUserId") == player.UserId and (room:GetAttribute("CurrentPlayers") or 0) >= 3
+end
+
+local function setRoomStartTransparency(room, panelTransparency)
+	local ready = room and getRoomStartReady(room)
+	local transparency = if panelTransparency >= 1 then 1 else 0
+	roomStart.Visible = true
+	roomStart.BackgroundTransparency = transparency
+	roomStart.TextTransparency = transparency
+	roomStart.Interactable = panelTransparency < 1 and ready
+
+	if roomStartFrame then
+		roomStartFrame.BackgroundTransparency = if panelTransparency >= 1 then 1 elseif ready then 1 else 0.32
+	end
+end
+
+local function tweenRoomStartTransparency(room, panelTransparency)
+	local ready = room and getRoomStartReady(room)
+	local transparency = if panelTransparency >= 1 then 1 else 0
+	roomStart.Visible = true
+	roomStart.Interactable = panelTransparency < 1 and ready
+	tween(roomStart, {
+		BackgroundTransparency = transparency,
+		TextTransparency = transparency,
+	})
+
+	if roomStartFrame then
+		tween(roomStartFrame, { BackgroundTransparency = if panelTransparency >= 1 then 1 elseif ready then 1 else 0.32 })
+	end
+end
+
+local function getRoomDescHidden(room)
+	return room and (room:GetAttribute("CurrentPlayers") or 0) >= 3
+end
+
+local function setRoomDescTransparency(room, panelTransparency)
+	if roomDesc then
+		roomDesc.TextTransparency = if panelTransparency >= 1 or getRoomDescHidden(room) then 1 else 0
+	end
+end
+
+local function tweenRoomDescTransparency(room, panelTransparency)
+	if roomDesc then
+		tween(roomDesc, { TextTransparency = if panelTransparency >= 1 or getRoomDescHidden(room) then 1 else 0 })
+	end
+end
+
 local function setRoomPanelTransparency(transparency)
 	roomFrame.BackgroundTransparency = if transparency >= 1 then 1 else 0.65
+	roomBack.BackgroundTransparency = transparency
 
 	for _, instance in roomPanel:GetDescendants() do
-		if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+		if instance ~= roomStart and instance ~= roomDesc and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox")) then
 			instance.TextTransparency = transparency
 		elseif instance:IsA("UIStroke") then
 			instance.Transparency = transparency
@@ -590,17 +641,21 @@ local function setRoomPanelTransparency(transparency)
 			stroke.Transparency = transparency
 		end
 	end
+
+	setRoomStartTransparency(currentRoom, transparency)
+	setRoomDescTransparency(currentRoom, transparency)
 end
 
 local function tweenRoomPanelTransparency(transparency)
 	tween(roomFrame, { BackgroundTransparency = if transparency >= 1 then 1 else 0.65 })
+	tween(roomBack, { BackgroundTransparency = transparency })
 
 	for _, instance in roomPanel:GetDescendants() do
 		if instance:IsA("GuiButton") then
 			instance.Interactable = transparency < 1
 		end
 
-		if instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox") then
+		if instance ~= roomStart and instance ~= roomDesc and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox")) then
 			tween(instance, { TextTransparency = transparency })
 		elseif instance:IsA("UIStroke") then
 			tween(instance, { Transparency = transparency })
@@ -608,7 +663,6 @@ local function tweenRoomPanelTransparency(transparency)
 	end
 
 	roomBack.Interactable = transparency < 1
-	roomStart.Interactable = transparency < 1 and roomStart.Visible
 
 	local icon = roomFrame:FindFirstChild("Icon")
 	if icon and icon:IsA("ImageLabel") then
@@ -622,6 +676,9 @@ local function tweenRoomPanelTransparency(transparency)
 			tween(stroke, { Transparency = transparency })
 		end
 	end
+
+	tweenRoomStartTransparency(currentRoom, transparency)
+	tweenRoomDescTransparency(currentRoom, transparency)
 end
 
 local function updateRoomPanel(room)
@@ -629,7 +686,8 @@ local function updateRoomPanel(room)
 	setText(roomPanel, "Setup", getRoomSetup(room))
 	setText(roomPanel, "Count", `{room:GetAttribute("CurrentPlayers") or 0}/{room:GetAttribute("Capacity") or 0}`)
 	setText(roomPanel, "Password", if room:GetAttribute("PasswordEnabled") then room:GetAttribute("Password") or "" else "")
-	roomStart.Visible = room:GetAttribute("OwnerUserId") == player.UserId and (room:GetAttribute("CurrentPlayers") or 0) >= 3
+	tweenRoomStartTransparency(room, 0)
+	tweenRoomDescTransparency(room, 0)
 
 	local locked = roomPanel:FindFirstChild("Locked", true)
 	if locked and locked:IsA("GuiObject") then
