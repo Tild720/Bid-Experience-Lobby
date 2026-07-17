@@ -44,8 +44,20 @@ if not startRoomEvent then
 	startRoomEvent.Parent = ReplicatedStorage
 end
 
+local debugFillRoomEvent = ReplicatedStorage:FindFirstChild("DebugFillRoomEvent")
+if not debugFillRoomEvent then
+	debugFillRoomEvent = Instance.new("RemoteEvent")
+	debugFillRoomEvent.Name = "DebugFillRoomEvent"
+	debugFillRoomEvent.Parent = ReplicatedStorage
+end
+
 local GAME_PLACE_ID = 98624801635176
 local nextRoomId = 0
+local VALID_SPEEDS = {
+	Slow = true,
+	Normal = true,
+	Fast = true,
+}
 
 local function getString(settings, key, fallback)
 	local value = settings[key]
@@ -60,6 +72,11 @@ local function getCapacity(capacityText)
 	return tonumber(string.match(capacityText, "%d+")) or 3
 end
 
+local function getSpeed(settings)
+	local speed = getString(settings, "CreateRoomSpeed", "Normal")
+	return if VALID_SPEEDS[speed] then speed else "Normal"
+end
+
 local function getBoolean(settings, key)
 	return settings[key] == true
 end
@@ -67,6 +84,7 @@ end
 local function updateRoomCount(room)
 	local members = room:FindFirstChild("Members")
 	local count = if members then #members:GetChildren() else 0
+	room:SetAttribute("DebugFillUserId", nil)
 	room:SetAttribute("CurrentPlayers", count)
 
 	if count <= 0 then
@@ -135,8 +153,8 @@ local function createRoom(player, settings)
 	room:SetAttribute("Capacity", getCapacity(capacityText))
 	room:SetAttribute("CurrentPlayers", 1)
 	room:SetAttribute("Round", getString(settings, "CreateRoomRound", "3 Round"))
-	room:SetAttribute("Theme", getString(settings, "CreateRoomTheme", "Roblox"))
-	room:SetAttribute("Mode", getString(settings, "CreateRoomMode", "Crazy"))
+	room:SetAttribute("Theme", "Roblox")
+	room:SetAttribute("Speed", getSpeed(settings))
 	room:SetAttribute("PasswordEnabled", passwordEnabled)
 	room:SetAttribute("Password", if passwordEnabled then getString(settings, "CreateRoomPassword", "") else "")
 	room:SetAttribute("VoiceOnly", getBoolean(settings, "CreateRoomVoiceOnly"))
@@ -180,6 +198,21 @@ leaveRoomEvent.OnServerEvent:Connect(function(player, roomName)
 	end
 end)
 
+debugFillRoomEvent.OnServerEvent:Connect(function(player)
+	if player.Name ~= "TildStudio" then
+		return
+	end
+
+	for _, room in roomsFolder:GetChildren() do
+		local members = room:FindFirstChild("Members")
+		if members and members:FindFirstChild(tostring(player.UserId)) then
+			room:SetAttribute("DebugFillUserId", player.UserId)
+			room:SetAttribute("CurrentPlayers", 3)
+			return
+		end
+	end
+end)
+
 startRoomEvent.OnServerEvent:Connect(function(player, roomName)
 	local room = roomsFolder:FindFirstChild(roomName)
 	local members = room and room:FindFirstChild("Members")
@@ -187,7 +220,8 @@ startRoomEvent.OnServerEvent:Connect(function(player, roomName)
 		return
 	end
 
-	if room:GetAttribute("OwnerUserId") ~= player.UserId or #members:GetChildren() < 3 then
+	local debugFilled = player.Name == "TildStudio" and room:GetAttribute("DebugFillUserId") == player.UserId
+	if room:GetAttribute("OwnerUserId") ~= player.UserId or (#members:GetChildren() < 3 and not debugFilled) then
 		return
 	end
 
@@ -207,16 +241,17 @@ startRoomEvent.OnServerEvent:Connect(function(player, roomName)
 		end
 	end
 
-	if #players < 3 then
+	if #players < 3 and not debugFilled then
 		return
 	end
 
 	local teleportData = {
+		LobbyPlaceId = game.PlaceId,
 		RoomName = room:GetAttribute("RoomName"),
 		Capacity = room:GetAttribute("Capacity"),
 		Round = room:GetAttribute("Round"),
 		Theme = room:GetAttribute("Theme"),
-		Mode = room:GetAttribute("Mode"),
+		Speed = room:GetAttribute("Speed"),
 		PasswordEnabled = room:GetAttribute("PasswordEnabled"),
 		VoiceOnly = room:GetAttribute("VoiceOnly"),
 		OwnerUserId = room:GetAttribute("OwnerUserId"),
@@ -224,7 +259,7 @@ startRoomEvent.OnServerEvent:Connect(function(player, roomName)
 	}
 
 	print(
-		`Starting room "{teleportData.RoomName}" | players {#players}/{teleportData.Capacity} ({table.concat(memberNames, ", ")}) | round={teleportData.Round}, theme={teleportData.Theme}, mode={teleportData.Mode}, voiceOnly={teleportData.VoiceOnly}`
+		`Starting room "{teleportData.RoomName}" | players {#players}/{teleportData.Capacity} ({table.concat(memberNames, ", ")}) | round={teleportData.Round}, theme={teleportData.Theme}, speed={teleportData.Speed}, voiceOnly={teleportData.VoiceOnly}`
 	)
 
 	TeleportService:TeleportPartyAsync(GAME_PLACE_ID, players, teleportData)

@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -9,16 +10,27 @@ local menu = mainGui:WaitForChild("Menu")
 local title = menu:WaitForChild("Title")
 local buttons = menu:WaitForChild("Buttons")
 local playButton = buttons:WaitForChild("1Play")
-local howToPlayButton = buttons:FindFirstChild("2HowToPlay") or buttons:WaitForChild("2Credits")
-howToPlayButton.Name = "2HowToPlay"
-howToPlayButton.Text = "How to play"
-local menuButtons = { playButton, howToPlayButton }
+local shopButton = buttons:WaitForChild("2Shop")
+shopButton.Text = "Shop"
+local shopPanel = mainGui:WaitForChild("Shop")
+local shopBack = shopPanel:WaitForChild("Back")
+shopPanel.Visible = false
+local menuButtons = { playButton, shopButton }
 local menuButtonResetters = {}
 local menuClosing = false
 local playPanelClosing = false
 local CLICK_SCALE_DOWN_TIME = 0.06
 local CLICK_SCALE_UP_TIME = 0.08
 local CLICK_FADE_PROGRESS = 0.7
+
+if player.Name == "TildStudio" then
+	local debugFillRoomEvent = ReplicatedStorage:WaitForChild("DebugFillRoomEvent")
+	UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+		if not gameProcessedEvent and input.KeyCode == Enum.KeyCode.F then
+			debugFillRoomEvent:FireServer()
+		end
+	end)
+end
 
 local gradient = title:FindFirstChild("TitleShimmer")
 if not gradient then
@@ -166,6 +178,10 @@ local createRoomSettings = {}
 local openDropDown
 local closeDropDown
 local DROPDOWN_SCALE_TIME = 0.08
+local legacyModeDropDown = createRoomSetting:FindFirstChild("ModeDropDown")
+if legacyModeDropDown and not createRoomSetting:FindFirstChild("SpeedDropdown") then
+	legacyModeDropDown.Name = "SpeedDropdown"
+end
 local dropDownConfigs = {
 	{
 		name = "CapacityDropDown",
@@ -179,11 +195,13 @@ local dropDownConfigs = {
 		},
 	},
 	{
-		name = "ModeDropDown",
-		attribute = "CreateRoomMode",
+		name = "SpeedDropdown",
+		attribute = "CreateRoomSpeed",
+		default = "2Normal",
 		buttons = {
-			{ name = "1Classic", text = "Classic" },
-			{ name = "2Crazy", text = "Crazy" },
+			{ name = "1Slow", text = "Slow" },
+			{ name = "2Normal", text = "Normal" },
+			{ name = "3Fast", text = "Fast" },
 		},
 	},
 	{
@@ -199,8 +217,8 @@ local dropDownConfigs = {
 	{
 		name = "ThemeDropDown",
 		attribute = "CreateRoomTheme",
+		default = "1Roblox",
 		buttons = {
-			{ name = "2Meme", text = "Meme" },
 			{ name = "1Roblox", text = "Roblox" },
 		},
 	},
@@ -255,7 +273,7 @@ local function setCreateRoomOuterTransparency(transparency)
 
 			if instance:IsA("TextBox") then
 				instance.BackgroundTransparency = transparency
-			elseif instance:IsA("GuiObject") and instance.Name:find("DropDown") then
+			elseif instance:IsA("GuiObject") and instance.Name:lower():find("dropdown") then
 				instance.BackgroundTransparency = transparency
 			elseif instance:IsA("Frame") and instance.Name == "Setting" then
 				instance.BackgroundTransparency = transparency
@@ -281,7 +299,7 @@ local function revealCreateRoomPanel()
 
 			if instance:IsA("TextBox") then
 				tween(instance, { BackgroundTransparency = 0 })
-			elseif instance:IsA("GuiObject") and instance.Name:find("DropDown") then
+			elseif instance:IsA("GuiObject") and instance.Name:lower():find("dropdown") then
 				tween(instance, { BackgroundTransparency = 0 })
 			end
 		end
@@ -318,7 +336,7 @@ local function hideCreateRoomPanel()
 
 			if instance:IsA("TextBox") then
 				tween(instance, { BackgroundTransparency = 1 })
-			elseif instance:IsA("GuiObject") and instance.Name:find("DropDown") then
+			elseif instance:IsA("GuiObject") and instance.Name:lower():find("dropdown") then
 				tween(instance, { BackgroundTransparency = 1 })
 			end
 		end
@@ -505,10 +523,10 @@ end
 local function getRoomSetup(room)
 	local round = room:GetAttribute("Round") or "3 Round"
 	local theme = room:GetAttribute("Theme") or "Roblox"
-	local mode = room:GetAttribute("Mode") or "Crazy"
+	local speed = room:GetAttribute("Speed") or "Normal"
 	local voiceOnly = if room:GetAttribute("VoiceOnly") then ", Voice Only" else ""
 
-	return `{round}, {theme} Theme, {mode} Mode{voiceOnly}`
+	return `{round}, {theme} Theme, {speed} Speed{voiceOnly}`
 end
 
 local function updateRoomCard(room, card)
@@ -956,7 +974,17 @@ addButtonEffects(playButton, "> Play", "Play", function()
 	revealPlayPanel()
 	tweenRoomCardsTransparency(0)
 end)
-addButtonEffects(howToPlayButton, "> How to play", "HowToPlay")
+addButtonEffects(shopButton, "> Shop", "Shop", function()
+	shopPanel.Visible = true
+end)
+
+shopBack.Activated:Connect(function()
+	shopPanel.Visible = false
+	resetMenuButtons()
+	setMenuTextTransparency(0)
+	setMenuInteractable(true)
+	menuClosing = false
+end)
 
 mainGui:WaitForChild("Play"):WaitForChild("CreateRoom").Activated:Connect(function()
 	tweenRoomCardsTransparency(1)
