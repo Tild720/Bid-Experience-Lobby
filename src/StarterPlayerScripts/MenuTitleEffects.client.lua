@@ -22,6 +22,7 @@ local trail = shopFrame:WaitForChild("Trail")
 local addSoon = shopFrame:WaitForChild("AddSoon")
 local shopContainer = shopFrame:WaitForChild("Container")
 local shopAlert = shopFrame:WaitForChild("Alert")
+local shopAlertStroke = shopAlert:WaitForChild("UIStroke")
 local plusMoney = shopFrame:WaitForChild("PlusMoney")
 local moneyLabel = shopFrame:WaitForChild("Money")
 local moneyShopDeco = shopFrame:WaitForChild("Deco")
@@ -48,6 +49,7 @@ local equippedSignSkin = player:WaitForChild("EquippedSignSkin")
 local equippedTrail = player:WaitForChild("EquippedTrail")
 local shopItems = { signSkin, trail, addSoon }
 local shopItemTweens = {}
+local shopAlertGeneration = 0
 shopPanel.Visible = false
 shopPanel.BackgroundTransparency = 1
 shopScale.Scale = 1
@@ -60,6 +62,10 @@ local CLICK_SCALE_DOWN_TIME = 0.06
 local CLICK_SCALE_UP_TIME = 0.08
 local CLICK_FADE_PROGRESS = 0.7
 local SHOP_CARD_STAGGER = 0.05
+local ALERT_DISPLAY_TIME = 1.25
+local ALERT_TWEEN_TIME = 0.12
+local CATEGORY_CLOSE_TIME = 0.15
+local CARD_ACTION_TWEEN_TIME = 0.12
 
 if player.Name == "TildStudio" then
 	local debugFillRoomEvent = ReplicatedStorage:WaitForChild("DebugFillRoomEvent")
@@ -226,23 +232,37 @@ local function setShopChromeHidden(isHidden, shouldTween)
 end
 
 local function hideShopAlert(shouldTween)
+	shopAlertGeneration += 1
 	if shouldTween then
 		tween(shopAlert, {
 			BackgroundTransparency = 1,
 			TextTransparency = 1,
-		})
+		}, ALERT_TWEEN_TIME)
+		tween(shopAlertStroke, { Transparency = 1 }, ALERT_TWEEN_TIME)
 	else
 		shopAlert.BackgroundTransparency = 1
 		shopAlert.TextTransparency = 1
+		shopAlertStroke.Transparency = 1
 	end
 end
 
 local function showShopAlert(message)
+	shopAlertGeneration += 1
+	local generation = shopAlertGeneration
 	shopAlert.Text = message
 	tween(shopAlert, {
-		BackgroundTransparency = 0.5,
+		BackgroundTransparency = 0.3,
 		TextTransparency = 0,
-	})
+	}, ALERT_TWEEN_TIME)
+	tween(shopAlertStroke, { Transparency = 0.7 }, ALERT_TWEEN_TIME)
+
+	task.delay(ALERT_DISPLAY_TIME, function()
+		if generation ~= shopAlertGeneration then
+			return
+		end
+
+		hideShopAlert(true)
+	end)
 end
 
 for _, item in shopItems do
@@ -543,6 +563,7 @@ local roomStart = roomFrame:WaitForChild("Start")
 local roomStartFrame = roomStart:FindFirstChild("Frame")
 local roomDesc = roomFrame:FindFirstChild("Desc")
 local roomAlert = roomFrame:WaitForChild("Alert")
+local roomAlertStroke = roomAlert:WaitForChild("UIStroke")
 local roomPassword = roomPanel:WaitForChild("Password")
 local roomPasswordScale = roomPassword:WaitForChild("UIScale")
 local roomPasswordTextBox = roomPassword:WaitForChild("TextBox")
@@ -566,6 +587,7 @@ roomPasswordScale.Scale = 0
 roomPasswordEnter.Interactable = false
 roomAlert.BackgroundTransparency = 1
 roomAlert.TextTransparency = 1
+roomAlertStroke.Transparency = 1
 roomPanel.Visible = false
 
 local function clearDropDownButtons(frame)
@@ -899,10 +921,12 @@ local function hideRoomAlert(shouldTween)
 		tween(roomAlert, {
 			BackgroundTransparency = 1,
 			TextTransparency = 1,
-		})
+		}, ALERT_TWEEN_TIME)
+		tween(roomAlertStroke, { Transparency = 1 }, ALERT_TWEEN_TIME)
 	else
 		roomAlert.BackgroundTransparency = 1
 		roomAlert.TextTransparency = 1
+		roomAlertStroke.Transparency = 1
 	end
 end
 
@@ -917,11 +941,12 @@ local function showRoomAlert(message)
 
 	roomAlert.Text = message
 	tween(roomAlert, {
-		BackgroundTransparency = 0.5,
+		BackgroundTransparency = 0.3,
 		TextTransparency = 0,
-	})
+	}, ALERT_TWEEN_TIME)
+	tween(roomAlertStroke, { Transparency = 0.7 }, ALERT_TWEEN_TIME)
 
-	task.delay(2.5, function()
+	task.delay(ALERT_DISPLAY_TIME, function()
 		if generation ~= roomAlertGeneration then
 			return
 		end
@@ -929,8 +954,9 @@ local function showRoomAlert(message)
 		tween(roomAlert, {
 			BackgroundTransparency = 1,
 			TextTransparency = 1,
-		})
-		task.delay(0.25, function()
+		}, ALERT_TWEEN_TIME)
+		tween(roomAlertStroke, { Transparency = 1 }, ALERT_TWEEN_TIME)
+		task.delay(ALERT_TWEEN_TIME, function()
 			if
 				generation == roomAlertGeneration
 				and not currentRoom
@@ -1228,6 +1254,7 @@ local shopCategoryGeneration = 0
 local shopCategoryClosing = false
 local purchasePending = false
 local moneyShopOpen = false
+local closeShopCategory
 
 local function setMoneyShopVisible(isVisible, shouldTween)
 	local textTransparency = if isVisible then 0 else 1
@@ -1273,16 +1300,25 @@ local function setMoneyShopEntryHidden(isHidden, shouldTween)
 	})
 end
 
-local function openMoneyShop()
-	if activeShopCategory or shopCategoryClosing or shopClosing or moneyShopOpen then
-		return
-	end
-
+local function openMoneyShopContent()
 	moneyShopOpen = true
-	fadeOutShopItems()
 	setMoneyShopEntryHidden(true, true)
 	hideShopAlert(true)
 	setMoneyShopVisible(true, true)
+end
+
+local function openMoneyShop()
+	if shopCategoryClosing or shopClosing or moneyShopOpen then
+		return
+	end
+
+	if activeShopCategory then
+		closeShopCategory(openMoneyShopContent)
+		return
+	end
+
+	fadeOutShopItems()
+	openMoneyShopContent()
 end
 
 local function closeMoneyShop()
@@ -1302,7 +1338,7 @@ local function getActionButtonText(categoryName, item)
 	local ownedFolder = if categoryName == "SignSkin" then ownedSignSkins else ownedTrails
 	local equippedValue = if categoryName == "SignSkin" then equippedSignSkin else equippedTrail
 	if equippedValue.Value == item.ModelName then
-		return "UnEquip"
+		return "Unequip"
 	end
 	if ownedFolder:FindFirstChild(item.ModelName) then
 		return "Equip"
@@ -1310,16 +1346,21 @@ local function getActionButtonText(categoryName, item)
 	return `Purchase [{formatMoney(item.Price)}P]`
 end
 
+local CARD_STROKE_TRANSPARENCIES = {
+	UIStroke1 = 0.83,
+	UIStroke2 = 0,
+}
+
 local function getCardStrokes(card)
-	local actionButton = card:WaitForChild("Button")
 	local strokes = {}
-	local cardStroke = card:FindFirstChild("UIStroke")
-	local actionStroke = actionButton:FindFirstChild("UIStroke")
-	if cardStroke then
-		table.insert(strokes, cardStroke)
-	end
-	if actionStroke then
-		table.insert(strokes, actionStroke)
+	for strokeName, visibleTransparency in CARD_STROKE_TRANSPARENCIES do
+		local stroke = card:FindFirstChild(strokeName, true)
+		if stroke and stroke:IsA("UIStroke") then
+			table.insert(strokes, {
+				instance = stroke,
+				visibleTransparency = visibleTransparency,
+			})
+		end
 	end
 	return strokes
 end
@@ -1329,20 +1370,21 @@ local function setCardActionVisible(card, isVisible, shouldTween)
 	actionButton.Interactable = isVisible and not purchasePending
 
 	if shouldTween then
-		tween(actionButton, if isVisible then
-			{ BackgroundTransparency = 0.3, TextTransparency = 0 }
-			else
-			{ BackgroundTransparency = 1, TextTransparency = 1 })
+		local properties = if isVisible
+			then { BackgroundTransparency = 0.3, TextTransparency = 0 }
+			else { BackgroundTransparency = 1, TextTransparency = 1 }
+		tween(actionButton, properties, CARD_ACTION_TWEEN_TIME)
 	else
 		actionButton.BackgroundTransparency = if isVisible then 0.3 else 1
 		actionButton.TextTransparency = if isVisible then 0 else 1
 	end
 
-	for _, stroke in getCardStrokes(card) do
+	for _, strokeRecord in getCardStrokes(card) do
+		local transparency = if isVisible then strokeRecord.visibleTransparency else 1
 		if shouldTween then
-			tween(stroke, { Transparency = if isVisible then 0.4 else 1 })
+			tween(strokeRecord.instance, { Transparency = transparency }, CARD_ACTION_TWEEN_TIME)
 		else
-			stroke.Transparency = if isVisible then 0.4 else 1
+			strokeRecord.instance.Transparency = transparency
 		end
 	end
 end
@@ -1426,7 +1468,7 @@ local function applyPurchaseResult(actionButton, result)
 	if result.Status == "Purchased" then
 		actionButton.Text = "Equip"
 	elseif result.Status == "Equipped" then
-		actionButton.Text = "UnEquip"
+		actionButton.Text = "Unequip"
 	elseif result.Status == "Unequipped" then
 		actionButton.Text = "Equip"
 	end
@@ -1498,7 +1540,11 @@ local function createShopCard(categoryName, item, index, generation)
 			showShopAlert("Could not contact shop. Try again.")
 		else
 			applyPurchaseResult(actionButton, result)
-			showShopAlert(result.Message or "Something went wrong. Try again.")
+			if result.Status ~= "Equipped" and result.Status ~= "Unequipped" then
+				showShopAlert(result.Message or "Something went wrong. Try again.")
+			else
+				hideShopAlert(true)
+			end
 		end
 
 	end)
@@ -1531,7 +1577,7 @@ local function openShopCategory(categoryName)
 	end
 end
 
-local function closeShopCategory()
+closeShopCategory = function(onClosed)
 	if not activeShopCategory or shopCategoryClosing then
 		return
 	end
@@ -1541,16 +1587,27 @@ local function closeShopCategory()
 	shopCategoryGeneration += 1
 	hideShopAlert(true)
 
+	local lastTween
 	for _, card in generatedShopCards do
 		card:WaitForChild("Button").Interactable = false
-		tween(card:WaitForChild("UIScale"), { Scale = 0 })
+		lastTween = tween(card:WaitForChild("UIScale"), { Scale = 0 }, CATEGORY_CLOSE_TIME)
 	end
 
-	task.delay(0.25, function()
+	local function finishClosing()
 		clearGeneratedShopCards()
-		fadeInShopItems()
 		shopCategoryClosing = false
-	end)
+		if onClosed then
+			onClosed()
+		else
+			fadeInShopItems()
+		end
+	end
+
+	if lastTween then
+		lastTween.Completed:Once(finishClosing)
+	else
+		finishClosing()
+	end
 end
 
 ownedSignSkins.ChildAdded:Connect(updateShopCardButtons)

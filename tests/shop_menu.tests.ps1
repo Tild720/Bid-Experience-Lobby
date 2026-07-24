@@ -22,6 +22,7 @@ foreach ($required in @(
 	'{ BackgroundTransparency = 0.35 }',
 	'openShopCategory("SignSkin")',
 	'openShopCategory("Trail")',
+	'closeShopCategory(openMoneyShopContent)',
 	'if activeShopCategory then',
 	'closeShopCategory()',
 	'clearGeneratedShopCards()',
@@ -36,6 +37,28 @@ foreach ($required in @(
 	if (-not $client.Contains($required)) {
 		throw "Shop menu flow is missing: $required"
 	}
+}
+
+$openMoneyShop = [regex]::Match(
+	$client,
+	'local function openMoneyShop\(\)[\s\S]*?local function closeMoneyShop'
+).Value
+if (
+	$openMoneyShop -notmatch 'if activeShopCategory then' -or
+	$openMoneyShop -notmatch 'closeShopCategory\(openMoneyShopContent\)'
+) {
+	throw "PlusMoney must scale out an active SignSkin or Trail category before showing point products"
+}
+
+$closeCategory = [regex]::Match(
+	$client,
+	'closeShopCategory\s*=\s*function\(onClosed\)[\s\S]*?ownedSignSkins\.ChildAdded'
+).Value
+if (
+	$closeCategory -notmatch 'tween\(card:WaitForChild\("UIScale"\),\s*\{\s*Scale\s*=\s*0\s*\},\s*CATEGORY_CLOSE_TIME\)' -or
+	$closeCategory -notmatch 'if onClosed then[\s\S]*onClosed\(\)'
+) {
+	throw "Category cards must scale out before the PlusMoney content callback runs"
 }
 
 if ($client -match 'addSoon\.Activated:Connect') {

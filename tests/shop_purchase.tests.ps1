@@ -81,12 +81,14 @@ foreach ($required in @(
 	'trailImage.BackgroundTransparency = 0',
 	'`Purchase [{formatMoney(item.Price)}P]`',
 	'return "Equip"',
-	'return "UnEquip"',
+	'return "Unequip"',
 	'purchaseFunction:InvokeServer(categoryName, item.ModelName)',
 	'selectedShopCard:WaitForChild("Button").Interactable = true',
 	'{ BackgroundTransparency = 0.3, TextTransparency = 0 }',
-	'Transparency = if isVisible then 0.4 else 1',
-	'BackgroundTransparency = 0.5',
+	'UIStroke1 = 0.83',
+	'UIStroke2 = 0',
+	'local CARD_ACTION_TWEEN_TIME = 0.12',
+	'BackgroundTransparency = 0.3',
 	'TextTransparency = 0',
 	'OwnedSignSkins',
 	'OwnedTrails',
@@ -98,6 +100,66 @@ foreach ($required in @(
 	if (-not $client.Contains($required)) {
 		throw "Client shop purchase flow is missing: $required"
 	}
+}
+
+if ($client -cmatch '"UnEquip"') {
+	throw 'Shop action buttons must spell "Unequip" consistently'
+}
+
+foreach ($required in @(
+	'return "Unequip"',
+	'actionButton.Text = "Unequip"',
+	'local shopAlertGeneration = 0',
+	'local shopAlertStroke = shopAlert:WaitForChild("UIStroke")',
+	'local roomAlertStroke = roomAlert:WaitForChild("UIStroke")',
+	'BackgroundTransparency = 0.3',
+	'task.delay(ALERT_DISPLAY_TIME',
+	'tween(shopAlert, {',
+	'result.Status ~= "Equipped" and result.Status ~= "Unequipped"'
+)) {
+	if (-not $client.Contains($required)) {
+		throw "Shop feedback flow is missing: $required"
+	}
+}
+
+foreach ($alertPrefix in @("shopAlert", "roomAlert")) {
+	$strokeName = "${alertPrefix}Stroke"
+	if (
+		$client -notmatch ([regex]::Escape($strokeName) + '\.Transparency\s*=\s*1') -or
+		$client -notmatch ('tween\(' + [regex]::Escape($strokeName) + ',\s*\{\s*Transparency\s*=\s*0\.7\s*\},\s*ALERT_TWEEN_TIME\)')
+	) {
+		throw "$alertPrefix UIStroke must initialize hidden and tween to 0.7 with the Alert"
+	}
+}
+
+$cardStrokeFunction = [regex]::Match(
+	$client,
+	'local function getCardStrokes\(card\)[\s\S]*?local function setCardActionVisible'
+).Value
+if (
+	$cardStrokeFunction -notmatch 'FindFirstChild\(strokeName,\s*true\)' -or
+	$cardStrokeFunction -notmatch 'visibleTransparency'
+) {
+	throw "SkinButton and TrailButton strokes must be resolved recursively by UIStroke1/UIStroke2 name"
+}
+
+$cardActionFunction = [regex]::Match(
+	$client,
+	'local function setCardActionVisible\(card,\s*isVisible,\s*shouldTween\)[\s\S]*?local function selectShopCard'
+).Value
+if ($cardActionFunction -notmatch 'CARD_ACTION_TWEEN_TIME') {
+	throw "Card action button and stroke tweens must use the faster interaction duration"
+}
+
+$roomAlertFunction = [regex]::Match(
+	$client,
+	'local function showRoomAlert\(message\)[\s\S]*?local function showPasswordPrompt'
+).Value
+if (
+	$roomAlertFunction -notmatch 'BackgroundTransparency\s*=\s*0\.3' -or
+	$roomAlertFunction -notmatch 'task\.delay\(ALERT_DISPLAY_TIME'
+) {
+	throw "Room alerts must use the same faster auto-fade and 0.3 background transparency"
 }
 
 $pendingReset = $client.IndexOf('purchasePending = false', $client.IndexOf('purchaseFunction:InvokeServer'))
