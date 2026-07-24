@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -14,14 +15,51 @@ local shopButton = buttons:WaitForChild("2Shop")
 shopButton.Text = "Shop"
 local shopPanel = mainGui:WaitForChild("Shop")
 local shopBack = shopPanel:WaitForChild("Back")
+local shopFrame = shopPanel:WaitForChild("Frame")
+local shopScale = shopFrame:WaitForChild("UIScale")
+local signSkin = shopFrame:WaitForChild("SignSkin")
+local trail = shopFrame:WaitForChild("Trail")
+local addSoon = shopFrame:WaitForChild("AddSoon")
+local shopContainer = shopFrame:WaitForChild("Container")
+local shopAlert = shopFrame:WaitForChild("Alert")
+local plusMoney = shopFrame:WaitForChild("PlusMoney")
+local moneyLabel = shopFrame:WaitForChild("Money")
+local moneyShopDeco = shopFrame:WaitForChild("Deco")
+local moneyProductButtons = {
+	{ button = shopFrame:WaitForChild("2000P"), productId = 3611489162 },
+	{ button = shopFrame:WaitForChild("7000P"), productId = 3611489310 },
+	{ button = shopFrame:WaitForChild("20000P"), productId = 3611489343 },
+}
+local modules = ReplicatedStorage:WaitForChild("Modules")
+local signSkinConfig = require(modules:WaitForChild("SignSkinConfig"))
+local trailConfig = require(modules:WaitForChild("TrailConfig"))
+local signSkinsFolder = ReplicatedStorage:WaitForChild("SignSkins")
+local trailFolder = ReplicatedStorage:WaitForChild("Trail")
+local purchaseFunction = ReplicatedStorage:WaitForChild("ShopPurchaseFunction")
+local purchaseAlert = ReplicatedStorage:WaitForChild("ShopPurchaseAlert")
+local uiObjects = ReplicatedStorage:WaitForChild("UIObjects")
+local skinButtonTemplate = uiObjects:WaitForChild("SkinButton")
+local trailButtonTemplate = uiObjects:WaitForChild("TrailButton")
+local leaderstats = player:WaitForChild("leaderstats")
+local money = leaderstats:WaitForChild("Money")
+local ownedSignSkins = player:WaitForChild("OwnedSignSkins")
+local ownedTrails = player:WaitForChild("OwnedTrails")
+local equippedSignSkin = player:WaitForChild("EquippedSignSkin")
+local equippedTrail = player:WaitForChild("EquippedTrail")
+local shopItems = { signSkin, trail, addSoon }
+local shopItemTweens = {}
 shopPanel.Visible = false
+shopPanel.BackgroundTransparency = 1
+shopScale.Scale = 1
 local menuButtons = { playButton, shopButton }
 local menuButtonResetters = {}
 local menuClosing = false
 local playPanelClosing = false
+local shopClosing = false
 local CLICK_SCALE_DOWN_TIME = 0.06
 local CLICK_SCALE_UP_TIME = 0.08
 local CLICK_FADE_PROGRESS = 0.7
+local SHOP_CARD_STAGGER = 0.05
 
 if player.Name == "TildStudio" then
 	local debugFillRoomEvent = ReplicatedStorage:WaitForChild("DebugFillRoomEvent")
@@ -102,6 +140,117 @@ local function tween(instance, properties, duration)
 	return tweenObject
 end
 
+local function cancelShopItemTweens()
+	for _, tweenObject in shopItemTweens do
+		tweenObject:Cancel()
+	end
+
+	table.clear(shopItemTweens)
+end
+
+local function setShopProperty(instance, propertyName, value, shouldTween)
+	if shouldTween then
+		table.insert(shopItemTweens, tween(instance, { [propertyName] = value }))
+	else
+		instance[propertyName] = value
+	end
+end
+
+local function setShopItemHidden(button, isHidden, shouldTween)
+	button.Interactable = not isHidden
+	setShopProperty(button, "BackgroundTransparency", if isHidden then 1 else 0.35, shouldTween)
+
+	for _, instance in button:GetDescendants() do
+		if instance:IsA("TextLabel") then
+			setShopProperty(instance, "TextTransparency", if isHidden then 1 else 0, shouldTween)
+		elseif instance:IsA("ViewportFrame") then
+			setShopProperty(instance, "ImageTransparency", if isHidden then 1 else 0, shouldTween)
+		elseif instance:IsA("UIStroke") then
+			setShopProperty(instance, "Transparency", if isHidden then 1 else 0, shouldTween)
+		end
+	end
+end
+
+local function fadeOutShopItems()
+	if shopClosing then
+		return
+	end
+
+	cancelShopItemTweens()
+	for _, item in shopItems do
+		setShopItemHidden(item, true, true)
+	end
+end
+
+local function restoreShopItems()
+	cancelShopItemTweens()
+	for _, item in shopItems do
+		setShopItemHidden(item, false, false)
+	end
+end
+
+local function fadeInShopItems()
+	cancelShopItemTweens()
+	for _, item in shopItems do
+		setShopItemHidden(item, false, true)
+	end
+end
+
+local function setShopChromeHidden(isHidden, shouldTween)
+	local function apply(instance, properties)
+		if shouldTween then
+			tween(instance, properties)
+		else
+			for propertyName, value in properties do
+				instance[propertyName] = value
+			end
+		end
+	end
+
+	plusMoney.Interactable = not isHidden
+	shopBack.Interactable = not isHidden
+	apply(plusMoney, { TextTransparency = if isHidden then 1 else 0 })
+	apply(moneyLabel, {
+		BackgroundTransparency = if isHidden then 1 else 0.65,
+		TextTransparency = if isHidden then 1 else 0,
+	})
+	apply(shopBack, {
+		BackgroundTransparency = if isHidden then 1 else 0,
+		TextTransparency = if isHidden then 1 else 0,
+	})
+
+	local backStroke = shopBack:FindFirstChild("UIStroke")
+	if backStroke then
+		apply(backStroke, { Transparency = if isHidden then 1 else 0.4 })
+	end
+end
+
+local function hideShopAlert(shouldTween)
+	if shouldTween then
+		tween(shopAlert, {
+			BackgroundTransparency = 1,
+			TextTransparency = 1,
+		})
+	else
+		shopAlert.BackgroundTransparency = 1
+		shopAlert.TextTransparency = 1
+	end
+end
+
+local function showShopAlert(message)
+	shopAlert.Text = message
+	tween(shopAlert, {
+		BackgroundTransparency = 0.5,
+		TextTransparency = 0,
+	})
+end
+
+for _, item in shopItems do
+	setShopItemHidden(item, true, false)
+end
+setShopChromeHidden(true, false)
+hideShopAlert(false)
+
 local function revealPlayPanel()
 	local playPanel = mainGui:WaitForChild("Play")
 	local frame = playPanel:WaitForChild("Frame")
@@ -168,7 +317,6 @@ local createRoomPasswordLabel = createRoomPassword:WaitForChild("TextLabel")
 local createRoomPasswordTextBox = createRoomPassword:WaitForChild("TextBox")
 local createRoomVoiceOnly = createRoomSetting:WaitForChild("VoiceOnly")
 local createRoomVoiceOnlyLabel = createRoomVoiceOnly:WaitForChild("TextLabel")
-local uiObjects = ReplicatedStorage:WaitForChild("UIObjects")
 local roomsFolder = ReplicatedStorage:WaitForChild("Rooms")
 local createRoomFunction = ReplicatedStorage:WaitForChild("CreateRoomFunction")
 local joinRoomFunction = ReplicatedStorage:WaitForChild("JoinRoomFunction")
@@ -394,13 +542,28 @@ local roomFrame = roomPanel:WaitForChild("Frame")
 local roomStart = roomFrame:WaitForChild("Start")
 local roomStartFrame = roomStart:FindFirstChild("Frame")
 local roomDesc = roomFrame:FindFirstChild("Desc")
+local roomAlert = roomFrame:WaitForChild("Alert")
+local roomPassword = roomPanel:WaitForChild("Password")
+local roomPasswordScale = roomPassword:WaitForChild("UIScale")
+local roomPasswordTextBox = roomPassword:WaitForChild("TextBox")
 local roomBack = roomPanel:WaitForChild("Back")
 local memberParent = roomFrame:WaitForChild("MemberParent")
 local roomCards = {}
 local roomCardsTransparency = 1
 local currentRoom
+local pendingPasswordRoom
+local roomAlertGeneration = 0
 local roomConnections = {}
 local tweenRoomCardsTransparency
+local JOIN_ERROR_MESSAGES = {
+	IncorrectPassword = "Incorrect password.",
+	RoomFull = "This room is full.",
+	VoiceRequired = "Voice chat is required to join this room.",
+	RoomUnavailable = "This room is no longer available.",
+}
+roomPasswordScale.Scale = 0
+roomAlert.BackgroundTransparency = 1
+roomAlert.TextTransparency = 1
 roomPanel.Visible = false
 
 local function clearDropDownButtons(frame)
@@ -637,14 +800,23 @@ local function tweenRoomDescTransparency(room, panelTransparency)
 	end
 end
 
+local function isRoomOverlay(instance)
+	return instance == roomAlert or instance == roomPassword or instance:IsDescendantOf(roomPassword)
+end
+
 local function setRoomPanelTransparency(transparency)
 	roomFrame.BackgroundTransparency = if transparency >= 1 then 1 else 0.65
 	roomBack.BackgroundTransparency = transparency
 
 	for _, instance in roomPanel:GetDescendants() do
-		if instance ~= roomStart and instance ~= roomDesc and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox")) then
+		if
+			not isRoomOverlay(instance)
+			and instance ~= roomStart
+			and instance ~= roomDesc
+			and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
+		then
 			instance.TextTransparency = transparency
-		elseif instance:IsA("UIStroke") then
+		elseif not isRoomOverlay(instance) and instance:IsA("UIStroke") then
 			instance.Transparency = transparency
 		end
 	end
@@ -669,13 +841,18 @@ local function tweenRoomPanelTransparency(transparency)
 	tween(roomBack, { BackgroundTransparency = transparency })
 
 	for _, instance in roomPanel:GetDescendants() do
-		if instance:IsA("GuiButton") then
+		if not isRoomOverlay(instance) and instance:IsA("GuiButton") then
 			instance.Interactable = transparency < 1
 		end
 
-		if instance ~= roomStart and instance ~= roomDesc and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox")) then
+		if
+			not isRoomOverlay(instance)
+			and instance ~= roomStart
+			and instance ~= roomDesc
+			and (instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
+		then
 			tween(instance, { TextTransparency = transparency })
-		elseif instance:IsA("UIStroke") then
+		elseif not isRoomOverlay(instance) and instance:IsA("UIStroke") then
 			tween(instance, { Transparency = transparency })
 		end
 	end
@@ -703,7 +880,6 @@ local function updateRoomPanel(room)
 	setText(roomPanel, "RoomName", room:GetAttribute("RoomName") or "Room")
 	setText(roomPanel, "Setup", getRoomSetup(room))
 	setText(roomPanel, "Count", `{room:GetAttribute("CurrentPlayers") or 0}/{room:GetAttribute("Capacity") or 0}`)
-	setText(roomPanel, "Password", if room:GetAttribute("PasswordEnabled") then room:GetAttribute("Password") or "" else "")
 	tweenRoomStartTransparency(room, 0)
 	tweenRoomDescTransparency(room, 0)
 
@@ -715,20 +891,94 @@ local function updateRoomPanel(room)
 	renderMembers(room)
 end
 
+local function hideRoomAlert(shouldTween)
+	roomAlertGeneration += 1
+	if shouldTween then
+		tween(roomAlert, {
+			BackgroundTransparency = 1,
+			TextTransparency = 1,
+		})
+	else
+		roomAlert.BackgroundTransparency = 1
+		roomAlert.TextTransparency = 1
+	end
+end
+
+local function showRoomAlert(message)
+	roomAlertGeneration += 1
+	local generation = roomAlertGeneration
+
+	if not currentRoom then
+		setRoomPanelTransparency(1)
+		roomPanel.Visible = true
+	end
+
+	roomAlert.Text = message
+	tween(roomAlert, {
+		BackgroundTransparency = 0.5,
+		TextTransparency = 0,
+	})
+
+	task.delay(2.5, function()
+		if generation ~= roomAlertGeneration then
+			return
+		end
+
+		tween(roomAlert, {
+			BackgroundTransparency = 1,
+			TextTransparency = 1,
+		})
+		task.delay(0.25, function()
+			if
+				generation == roomAlertGeneration
+				and not currentRoom
+				and not pendingPasswordRoom
+				and roomPasswordScale.Scale <= 0
+			then
+				roomPanel.Visible = false
+			end
+		end)
+	end)
+end
+
+local function showPasswordPrompt(room)
+	pendingPasswordRoom = room
+	currentRoom = nil
+	clearRoomConnections()
+	clearMemberCards()
+	hideRoomAlert(false)
+	setRoomPanelTransparency(1)
+	roomPanel.Visible = true
+	roomPasswordTextBox.Text = ""
+	tween(roomPasswordScale, { Scale = 1 })
+
+	task.defer(function()
+		if pendingPasswordRoom == room then
+			roomPasswordTextBox:CaptureFocus()
+		end
+	end)
+end
+
 local function hideRoomPanel()
 	clearRoomConnections()
 	clearMemberCards()
+	pendingPasswordRoom = nil
+	tween(roomPasswordScale, { Scale = 0 })
+	hideRoomAlert(true)
 	tweenRoomPanelTransparency(1)
 	roomBack.Interactable = false
 	currentRoom = nil
 	task.delay(0.25, function()
-		if not currentRoom then
+		if not currentRoom and not pendingPasswordRoom then
 			roomPanel.Visible = false
 		end
 	end)
 end
 
 local function showRoomPanel(room)
+	pendingPasswordRoom = nil
+	roomPasswordScale.Scale = 0
+	hideRoomAlert(false)
 	currentRoom = room
 	setRoomPanelTransparency(1)
 	roomPanel.Visible = true
@@ -760,6 +1010,40 @@ local function showRoomPanel(room)
 		end))
 	end
 end
+
+local function requestJoin(room, password)
+	local invoked, result = pcall(function()
+		return joinRoomFunction:InvokeServer(room.Name, password)
+	end)
+
+	if invoked and typeof(result) == "table" and result.Success == true then
+		local joinedRoom = roomsFolder:FindFirstChild(result.RoomName)
+		if joinedRoom then
+			showRoomPanel(joinedRoom)
+			return
+		end
+	end
+
+	local errorCode = if invoked and typeof(result) == "table" then result.Error else "RoomUnavailable"
+	showRoomAlert(JOIN_ERROR_MESSAGES[errorCode] or JOIN_ERROR_MESSAGES.RoomUnavailable)
+end
+
+roomPasswordTextBox.FocusLost:Connect(function(enterPressed)
+	if not enterPressed then
+		return
+	end
+
+	local room = pendingPasswordRoom
+	local password = roomPasswordTextBox.Text
+	pendingPasswordRoom = nil
+	tween(roomPasswordScale, { Scale = 0 })
+
+	if room then
+		requestJoin(room, password)
+	else
+		showRoomAlert(JOIN_ERROR_MESSAGES.RoomUnavailable)
+	end
+end)
 
 local function tweenStoredTransparency(instance, propertyName, transparency)
 	local attributeName = "RoomBase" .. propertyName
@@ -860,10 +1144,12 @@ local function renderRoom(room)
 
 	if card:IsA("GuiButton") then
 		card.Activated:Connect(function()
-			local roomName = joinRoomFunction:InvokeServer(room.Name)
-			local joinedRoom = roomName and roomsFolder:FindFirstChild(roomName)
-			if joinedRoom then
-				showRoomPanel(joinedRoom)
+			if room:GetAttribute("PasswordEnabled") == true then
+				showPasswordPrompt(room)
+			else
+				pendingPasswordRoom = nil
+				tween(roomPasswordScale, { Scale = 0 })
+				requestJoin(room, nil)
 			end
 		end)
 	end
@@ -895,7 +1181,381 @@ roomsFolder.ChildRemoved:Connect(function(room)
 		hideRoomPanel()
 		revealPlayPanel()
 		tweenRoomCardsTransparency(0)
+	elseif pendingPasswordRoom == room then
+		pendingPasswordRoom = nil
+		tween(roomPasswordScale, { Scale = 0 })
+		showRoomAlert(JOIN_ERROR_MESSAGES.RoomUnavailable)
 	end
+end)
+
+local function formatMoney(value)
+	local formatted = tostring(math.max(0, math.floor(value)))
+	while true do
+		local updated, replacements = formatted:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
+		formatted = updated
+		if replacements == 0 then
+			break
+		end
+	end
+	return formatted
+end
+
+local function updateMoneyLabel()
+	moneyLabel.Text = `{formatMoney(money.Value)}P`
+end
+
+updateMoneyLabel()
+money:GetPropertyChangedSignal("Value"):Connect(updateMoneyLabel)
+
+local generatedShopCards = {}
+local shopCardRecords = {}
+local activeShopCategory
+local selectedShopCard
+local shopCategoryGeneration = 0
+local shopCategoryClosing = false
+local purchasePending = false
+local moneyShopOpen = false
+
+local function setMoneyShopVisible(isVisible, shouldTween)
+	local textTransparency = if isVisible then 0 else 1
+	local backgroundTransparency = if isVisible then 0.35 else 1
+
+	if shouldTween then
+		tween(moneyShopDeco, { TextTransparency = textTransparency })
+	else
+		moneyShopDeco.TextTransparency = textTransparency
+	end
+
+	for _, product in moneyProductButtons do
+		local button = product.button
+		button.Interactable = isVisible
+		if shouldTween then
+			tween(button, {
+				BackgroundTransparency = backgroundTransparency,
+				TextTransparency = textTransparency,
+			})
+		else
+			button.BackgroundTransparency = backgroundTransparency
+			button.TextTransparency = textTransparency
+		end
+	end
+end
+
+local function setMoneyShopEntryHidden(isHidden, shouldTween)
+	local function apply(instance, properties)
+		if shouldTween then
+			tween(instance, properties)
+		else
+			for propertyName, value in properties do
+				instance[propertyName] = value
+			end
+		end
+	end
+
+	plusMoney.Interactable = not isHidden
+	apply(plusMoney, { TextTransparency = if isHidden then 1 else 0 })
+	apply(moneyLabel, {
+		BackgroundTransparency = if isHidden then 1 else 0.65,
+		TextTransparency = if isHidden then 1 else 0,
+	})
+end
+
+local function openMoneyShop()
+	if activeShopCategory or shopCategoryClosing or shopClosing or moneyShopOpen then
+		return
+	end
+
+	moneyShopOpen = true
+	fadeOutShopItems()
+	setMoneyShopEntryHidden(true, true)
+	hideShopAlert(true)
+	setMoneyShopVisible(true, true)
+end
+
+local function closeMoneyShop()
+	if not moneyShopOpen then
+		return
+	end
+
+	moneyShopOpen = false
+	setMoneyShopVisible(false, true)
+	setMoneyShopEntryHidden(false, true)
+	fadeInShopItems()
+end
+
+setMoneyShopVisible(false, false)
+
+local function getActionButtonText(categoryName, item)
+	local ownedFolder = if categoryName == "SignSkin" then ownedSignSkins else ownedTrails
+	local equippedValue = if categoryName == "SignSkin" then equippedSignSkin else equippedTrail
+	if equippedValue.Value == item.ModelName then
+		return "UnEquip"
+	end
+	if ownedFolder:FindFirstChild(item.ModelName) then
+		return "Equip"
+	end
+	return `Purchase [{formatMoney(item.Price)}P]`
+end
+
+local function getCardStrokes(card)
+	local actionButton = card:WaitForChild("Button")
+	local strokes = {}
+	local cardStroke = card:FindFirstChild("UIStroke")
+	local actionStroke = actionButton:FindFirstChild("UIStroke")
+	if cardStroke then
+		table.insert(strokes, cardStroke)
+	end
+	if actionStroke then
+		table.insert(strokes, actionStroke)
+	end
+	return strokes
+end
+
+local function setCardActionVisible(card, isVisible, shouldTween)
+	local actionButton = card:WaitForChild("Button")
+	actionButton.Interactable = isVisible and not purchasePending
+
+	if shouldTween then
+		tween(actionButton, if isVisible then
+			{ BackgroundTransparency = 0.3, TextTransparency = 0 }
+			else
+			{ BackgroundTransparency = 1, TextTransparency = 1 })
+	else
+		actionButton.BackgroundTransparency = if isVisible then 0.3 else 1
+		actionButton.TextTransparency = if isVisible then 0 else 1
+	end
+
+	for _, stroke in getCardStrokes(card) do
+		if shouldTween then
+			tween(stroke, { Transparency = if isVisible then 0.4 else 1 })
+		else
+			stroke.Transparency = if isVisible then 0.4 else 1
+		end
+	end
+end
+
+local function selectShopCard(card)
+	if selectedShopCard == card or shopCategoryClosing then
+		return
+	end
+
+	if selectedShopCard and selectedShopCard.Parent then
+		setCardActionVisible(selectedShopCard, false, true)
+	end
+
+	selectedShopCard = card
+	hideShopAlert(true)
+	setCardActionVisible(card, true, true)
+end
+
+local function updateShopCardButtons()
+	for card, record in shopCardRecords do
+		if card.Parent then
+			card:WaitForChild("Button").Text = getActionButtonText(record.categoryName, record.item)
+		end
+	end
+end
+
+local function setupSignSkinPreview(card, item)
+	local viewport = card:WaitForChild("ViewportFrame")
+	local source = signSkinsFolder:FindFirstChild(item.ModelName)
+	if not source then
+		return
+	end
+
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Name = "Preview"
+	worldModel.Parent = viewport
+
+	local preview = source:Clone()
+	for _, descendant in preview:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+		end
+	end
+	preview.Parent = worldModel
+	worldModel:PivotTo(CFrame.new())
+
+	local camera = Instance.new("Camera")
+	camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, -4), Vector3.zero)
+	camera.Parent = viewport
+	viewport.CurrentCamera = camera
+end
+
+local function setupTrailPreview(card, item)
+	local trailImage = card:WaitForChild("TrailImage")
+	local trailObject = trailFolder:FindFirstChild(item.ModelName)
+	if not trailObject or not trailObject:IsA("Trail") then
+		return
+	end
+
+	local colorGradient = trailImage:FindFirstChildWhichIsA("UIGradient")
+	if not colorGradient then
+		colorGradient = Instance.new("UIGradient")
+		colorGradient.Name = "TrailColor"
+		colorGradient.Parent = trailImage
+	end
+	colorGradient.Color = trailObject.Color
+	trailImage.ImageColor3 = Color3.new(1, 1, 1)
+	trailImage.BackgroundColor3 = Color3.new(1, 1, 1)
+	trailImage.Image = trailObject.Texture
+
+	if trailObject.Texture == "" then
+		trailImage.ImageTransparency = 1
+		trailImage.BackgroundTransparency = 0
+	else
+		trailImage.ImageTransparency = 0
+		trailImage.BackgroundTransparency = 1
+	end
+end
+
+local function applyPurchaseResult(actionButton, result)
+	if result.Status == "Purchased" then
+		actionButton.Text = "Equip"
+	elseif result.Status == "Equipped" then
+		actionButton.Text = "UnEquip"
+	elseif result.Status == "Unequipped" then
+		actionButton.Text = "Equip"
+	end
+end
+
+local function createShopCard(categoryName, item, index, generation)
+	local template = if categoryName == "SignSkin" then skinButtonTemplate else trailButtonTemplate
+	local card = template:Clone()
+	card.Name = item.ModelName
+	card.LayoutOrder = index
+	card.Visible = true
+
+	local nameLabel = card:WaitForChild("Name")
+	local priceLabel = card:WaitForChild("Price")
+	local actionButton = card:WaitForChild("Button")
+	local scale = card:WaitForChild("UIScale")
+	nameLabel.Text = item.Name
+	priceLabel.Text = `{formatMoney(item.Price)}P`
+	actionButton.Text = getActionButtonText(categoryName, item)
+	scale.Scale = 0
+	setCardActionVisible(card, false, false)
+
+	if categoryName == "SignSkin" then
+		setupSignSkinPreview(card, item)
+	else
+		setupTrailPreview(card, item)
+	end
+
+	shopCardRecords[card] = {
+		categoryName = categoryName,
+		item = item,
+	}
+	table.insert(generatedShopCards, card)
+	card.Parent = shopContainer
+
+	task.delay((index - 1) * SHOP_CARD_STAGGER, function()
+		if generation == shopCategoryGeneration and activeShopCategory == categoryName and card.Parent then
+			tween(scale, { Scale = 1 })
+		end
+	end)
+
+	if card:IsA("GuiButton") then
+		card.Activated:Connect(function()
+			selectShopCard(card)
+		end)
+	end
+
+	actionButton.Activated:Connect(function()
+		if selectedShopCard ~= card or purchasePending then
+			return
+		end
+
+		purchasePending = true
+		actionButton.Interactable = false
+		local requestGeneration = shopCategoryGeneration
+		local requestSucceeded, result = pcall(function()
+			return purchaseFunction:InvokeServer(categoryName, item.ModelName)
+		end)
+		purchasePending = false
+
+		if not shopCategoryClosing and activeShopCategory and selectedShopCard and selectedShopCard.Parent then
+			selectedShopCard:WaitForChild("Button").Interactable = true
+		end
+		if requestGeneration ~= shopCategoryGeneration or activeShopCategory ~= categoryName then
+			return
+		end
+
+		if not requestSucceeded or typeof(result) ~= "table" then
+			showShopAlert("Could not contact shop. Try again.")
+		else
+			applyPurchaseResult(actionButton, result)
+			showShopAlert(result.Message or "Something went wrong. Try again.")
+		end
+
+	end)
+end
+
+local function clearGeneratedShopCards()
+	for _, card in generatedShopCards do
+		shopCardRecords[card] = nil
+		card:Destroy()
+	end
+	table.clear(generatedShopCards)
+	selectedShopCard = nil
+end
+
+local function openShopCategory(categoryName)
+	if activeShopCategory or shopCategoryClosing or shopClosing then
+		return
+	end
+
+	local config = if categoryName == "SignSkin" then signSkinConfig else trailConfig
+	activeShopCategory = categoryName
+	shopCategoryGeneration += 1
+	local generation = shopCategoryGeneration
+	fadeOutShopItems()
+	hideShopAlert(true)
+	clearGeneratedShopCards()
+
+	for index, item in ipairs(config) do
+		createShopCard(categoryName, item, index, generation)
+	end
+end
+
+local function closeShopCategory()
+	if not activeShopCategory or shopCategoryClosing then
+		return
+	end
+
+	shopCategoryClosing = true
+	activeShopCategory = nil
+	shopCategoryGeneration += 1
+	hideShopAlert(true)
+
+	for _, card in generatedShopCards do
+		card:WaitForChild("Button").Interactable = false
+		tween(card:WaitForChild("UIScale"), { Scale = 0 })
+	end
+
+	task.delay(0.25, function()
+		clearGeneratedShopCards()
+		fadeInShopItems()
+		shopCategoryClosing = false
+	end)
+end
+
+ownedSignSkins.ChildAdded:Connect(updateShopCardButtons)
+ownedSignSkins.ChildRemoved:Connect(updateShopCardButtons)
+ownedTrails.ChildAdded:Connect(updateShopCardButtons)
+ownedTrails.ChildRemoved:Connect(updateShopCardButtons)
+equippedSignSkin:GetPropertyChangedSignal("Value"):Connect(updateShopCardButtons)
+equippedTrail:GetPropertyChangedSignal("Value"):Connect(updateShopCardButtons)
+
+for _, product in moneyProductButtons do
+	local productId = product.productId
+	product.button.Activated:Connect(function()
+		MarketplaceService:PromptProductPurchase(player, productId)
+	end)
+end
+
+purchaseAlert.OnClientEvent:Connect(function(message)
+	showShopAlert(message)
 end)
 
 local function addButtonEffects(button, hoverText, printText, onActivated)
@@ -975,15 +1635,62 @@ addButtonEffects(playButton, "> Play", "Play", function()
 	tweenRoomCardsTransparency(0)
 end)
 addButtonEffects(shopButton, "> Shop", "Shop", function()
+	shopFrame.BackgroundTransparency = 1
+	shopScale.Scale = 1
+	for _, item in shopItems do
+		setShopItemHidden(item, true, false)
+	end
+	setShopChromeHidden(true, false)
+	moneyShopOpen = false
+	setMoneyShopVisible(false, false)
+	hideShopAlert(false)
+	updateMoneyLabel()
 	shopPanel.Visible = true
+	tween(shopFrame, { BackgroundTransparency = 0.35 })
+	setShopChromeHidden(false, true)
+	fadeInShopItems()
+end)
+
+signSkin.Activated:Connect(function()
+	openShopCategory("SignSkin")
+end)
+trail.Activated:Connect(function()
+	openShopCategory("Trail")
+end)
+plusMoney.Activated:Connect(function()
+	openMoneyShop()
 end)
 
 shopBack.Activated:Connect(function()
-	shopPanel.Visible = false
-	resetMenuButtons()
-	setMenuTextTransparency(0)
-	setMenuInteractable(true)
-	menuClosing = false
+	if shopClosing or shopCategoryClosing then
+		return
+	end
+
+	if activeShopCategory then
+		closeShopCategory()
+		return
+	end
+	if moneyShopOpen then
+		closeMoneyShop()
+		return
+	end
+
+	fadeOutShopItems()
+	setMoneyShopVisible(false, true)
+	shopClosing = true
+	shopBack.Interactable = false
+	hideShopAlert(true)
+	setShopChromeHidden(true, true)
+	tween(shopFrame, { BackgroundTransparency = 1 }).Completed:Once(function()
+		shopPanel.Visible = false
+		clearGeneratedShopCards()
+		resetMenuButtons()
+		setMenuTextTransparency(0)
+		setMenuInteractable(true)
+		menuClosing = false
+		shopClosing = false
+		shopBack.Interactable = true
+	end)
 end)
 
 mainGui:WaitForChild("Play"):WaitForChild("CreateRoom").Activated:Connect(function()

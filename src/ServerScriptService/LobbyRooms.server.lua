@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
+local VoiceChatService = game:GetService("VoiceChatService")
 
 local roomsFolder = ReplicatedStorage:FindFirstChild("Rooms")
 if not roomsFolder then
@@ -53,6 +54,7 @@ end
 
 local GAME_PLACE_ID = 98624801635176
 local nextRoomId = 0
+local roomPasswords = setmetatable({}, { __mode = "k" })
 local VALID_SPEEDS = {
 	Slow = true,
 	Normal = true,
@@ -79,6 +81,28 @@ end
 
 local function getBoolean(settings, key)
 	return settings[key] == true
+end
+
+local function canUseVoice(player)
+	local success, enabled = pcall(function()
+		return VoiceChatService:IsVoiceEnabledForUserIdAsync(player.UserId)
+	end)
+
+	return success and enabled == true
+end
+
+local function joinFailure(errorCode)
+	return {
+		Success = false,
+		Error = errorCode,
+	}
+end
+
+local function joinSuccess(room)
+	return {
+		Success = true,
+		RoomName = room.Name,
+	}
 end
 
 local function updateRoomCount(room)
@@ -156,8 +180,11 @@ local function createRoom(player, settings)
 	room:SetAttribute("Theme", "Roblox")
 	room:SetAttribute("Speed", getSpeed(settings))
 	room:SetAttribute("PasswordEnabled", passwordEnabled)
-	room:SetAttribute("Password", if passwordEnabled then getString(settings, "CreateRoomPassword", "") else "")
 	room:SetAttribute("VoiceOnly", getBoolean(settings, "CreateRoomVoiceOnly"))
+	roomPasswords[room] = if passwordEnabled then getString(settings, "CreateRoomPassword", "") else nil
+	room.Destroying:Connect(function()
+		roomPasswords[room] = nil
+	end)
 	local members = Instance.new("Folder")
 	members.Name = "Members"
 	members.Parent = room
@@ -170,25 +197,49 @@ end
 createRoomFunction.OnServerInvoke = createRoom
 createRoomEvent.OnServerEvent:Connect(createRoom)
 
-joinRoomFunction.OnServerInvoke = function(player, roomName)
+joinRoomFunction.OnServerInvoke = function(player, roomName, password)
+	if typeof(roomName) ~= "string" then
+		return joinFailure("RoomUnavailable")
+	end
+
 	local room = roomsFolder:FindFirstChild(roomName)
 	if not room then
-		return nil
+		return joinFailure("RoomUnavailable")
 	end
 
 	local members = room:FindFirstChild("Members")
 	if not members then
-		return nil
+		return joinFailure("RoomUnavailable")
+	end
+
+	if members:FindFirstChild(tostring(player.UserId)) then
+		return joinSuccess(room)
+	end
+
+	if room:GetAttribute("PasswordEnabled") == true and roomPasswords[room] ~= password then
+		return joinFailure("IncorrectPassword")
 	end
 
 	local capacity = room:GetAttribute("Capacity") or 0
-	if not members:FindFirstChild(tostring(player.UserId)) and #members:GetChildren() >= capacity then
-		return nil
+	if #members:GetChildren() >= capacity then
+		return joinFailure("RoomFull")
+	end
+
+	if room:GetAttribute("VoiceOnly") == true and not canUseVoice(player) then
+		return joinFailure("VoiceRequired")
+	end
+
+	if room.Parent ~= roomsFolder or room:FindFirstChild("Members") ~= members then
+		return joinFailure("RoomUnavailable")
+	end
+
+	if #members:GetChildren() >= capacity then
+		return joinFailure("RoomFull")
 	end
 
 	leaveAllRooms(player)
 	addMember(room, player)
-	return room.Name
+	return joinSuccess(room)
 end
 
 leaveRoomEvent.OnServerEvent:Connect(function(player, roomName)
