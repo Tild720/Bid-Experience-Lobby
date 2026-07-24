@@ -163,6 +163,11 @@ local function createRoom(player, settings)
 		return nil
 	end
 
+	local voiceOnly = getBoolean(settings, "CreateRoomVoiceOnly")
+	if voiceOnly and not canUseVoice(player) then
+		return nil, "VoiceRequired"
+	end
+
 	leaveAllRooms(player)
 	nextRoomId += 1
 
@@ -180,7 +185,7 @@ local function createRoom(player, settings)
 	room:SetAttribute("Theme", "Roblox")
 	room:SetAttribute("Speed", getSpeed(settings))
 	room:SetAttribute("PasswordEnabled", passwordEnabled)
-	room:SetAttribute("VoiceOnly", getBoolean(settings, "CreateRoomVoiceOnly"))
+	room:SetAttribute("VoiceOnly", voiceOnly)
 	roomPasswords[room] = if passwordEnabled then getString(settings, "CreateRoomPassword", "") else nil
 	room.Destroying:Connect(function()
 		roomPasswords[room] = nil

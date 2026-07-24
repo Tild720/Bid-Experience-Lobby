@@ -546,6 +546,7 @@ local roomAlert = roomFrame:WaitForChild("Alert")
 local roomPassword = roomPanel:WaitForChild("Password")
 local roomPasswordScale = roomPassword:WaitForChild("UIScale")
 local roomPasswordTextBox = roomPassword:WaitForChild("TextBox")
+local roomPasswordEnter = roomPassword:WaitForChild("Enter")
 local roomBack = roomPanel:WaitForChild("Back")
 local memberParent = roomFrame:WaitForChild("MemberParent")
 local roomCards = {}
@@ -562,6 +563,7 @@ local JOIN_ERROR_MESSAGES = {
 	RoomUnavailable = "This room is no longer available.",
 }
 roomPasswordScale.Scale = 0
+roomPasswordEnter.Interactable = false
 roomAlert.BackgroundTransparency = 1
 roomAlert.TextTransparency = 1
 roomPanel.Visible = false
@@ -950,6 +952,7 @@ local function showPasswordPrompt(room)
 	setRoomPanelTransparency(1)
 	roomPanel.Visible = true
 	roomPasswordTextBox.Text = ""
+	roomPasswordEnter.Interactable = true
 	tween(roomPasswordScale, { Scale = 1 })
 
 	task.defer(function()
@@ -963,6 +966,7 @@ local function hideRoomPanel()
 	clearRoomConnections()
 	clearMemberCards()
 	pendingPasswordRoom = nil
+	roomPasswordEnter.Interactable = false
 	tween(roomPasswordScale, { Scale = 0 })
 	hideRoomAlert(true)
 	tweenRoomPanelTransparency(1)
@@ -977,6 +981,7 @@ end
 
 local function showRoomPanel(room)
 	pendingPasswordRoom = nil
+	roomPasswordEnter.Interactable = false
 	roomPasswordScale.Scale = 0
 	hideRoomAlert(false)
 	currentRoom = room
@@ -1016,7 +1021,7 @@ local function requestJoin(room, password)
 		return joinRoomFunction:InvokeServer(room.Name, password)
 	end)
 
-	if invoked and typeof(result) == "table" and result.Success == true then
+	if invoked and typeof(result) == "table" and result.Success == true and typeof(result.RoomName) == "string" then
 		local joinedRoom = roomsFolder:FindFirstChild(result.RoomName)
 		if joinedRoom then
 			showRoomPanel(joinedRoom)
@@ -1028,14 +1033,11 @@ local function requestJoin(room, password)
 	showRoomAlert(JOIN_ERROR_MESSAGES[errorCode] or JOIN_ERROR_MESSAGES.RoomUnavailable)
 end
 
-roomPasswordTextBox.FocusLost:Connect(function(enterPressed)
-	if not enterPressed then
-		return
-	end
-
+local function submitPassword()
 	local room = pendingPasswordRoom
 	local password = roomPasswordTextBox.Text
 	pendingPasswordRoom = nil
+	roomPasswordEnter.Interactable = false
 	tween(roomPasswordScale, { Scale = 0 })
 
 	if room then
@@ -1043,7 +1045,16 @@ roomPasswordTextBox.FocusLost:Connect(function(enterPressed)
 	else
 		showRoomAlert(JOIN_ERROR_MESSAGES.RoomUnavailable)
 	end
+end
+
+roomPasswordTextBox.FocusLost:Connect(function(enterPressed)
+	if not enterPressed then
+		return
+	end
+
+	submitPassword()
 end)
+roomPasswordEnter.Activated:Connect(submitPassword)
 
 local function tweenStoredTransparency(instance, propertyName, transparency)
 	local attributeName = "RoomBase" .. propertyName
@@ -1148,6 +1159,7 @@ local function renderRoom(room)
 				showPasswordPrompt(room)
 			else
 				pendingPasswordRoom = nil
+				roomPasswordEnter.Interactable = false
 				tween(roomPasswordScale, { Scale = 0 })
 				requestJoin(room, nil)
 			end
@@ -1183,6 +1195,7 @@ roomsFolder.ChildRemoved:Connect(function(room)
 		tweenRoomCardsTransparency(0)
 	elseif pendingPasswordRoom == room then
 		pendingPasswordRoom = nil
+		roomPasswordEnter.Interactable = false
 		tween(roomPasswordScale, { Scale = 0 })
 		showRoomAlert(JOIN_ERROR_MESSAGES.RoomUnavailable)
 	end
@@ -1707,7 +1720,7 @@ end)
 
 createRoomCreate.Activated:Connect(function()
 	createRoomSettings.CreateRoomPassword = createRoomPasswordTextBox.Text
-	local roomName = createRoomFunction:InvokeServer(createRoomSettings)
+	local roomName, createError = createRoomFunction:InvokeServer(createRoomSettings)
 	local room = roomName and roomsFolder:WaitForChild(roomName, 5)
 	hideCreateRoomPanel()
 
@@ -1716,6 +1729,9 @@ createRoomCreate.Activated:Connect(function()
 	else
 		revealPlayPanel()
 		tweenRoomCardsTransparency(0)
+		if createError then
+			showRoomAlert(JOIN_ERROR_MESSAGES[createError] or JOIN_ERROR_MESSAGES.RoomUnavailable)
+		end
 	end
 end)
 
