@@ -1,4 +1,5 @@
 local Players = game:GetService("Players")
+local LocalizationService = game:GetService("LocalizationService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TeleportService = game:GetService("TeleportService")
 local VoiceChatService = game:GetService("VoiceChatService")
@@ -53,8 +54,11 @@ if not debugFillRoomEvent then
 end
 
 local GAME_PLACE_ID = 98624801635176
+local DEFAULT_COUNTRY_FLAG = "🌐"
+local REGIONAL_INDICATOR_OFFSET = 127397
 local nextRoomId = 0
 local roomPasswords = setmetatable({}, { __mode = "k" })
+local playerCountryFlags = setmetatable({}, { __mode = "k" })
 local VALID_SPEEDS = {
 	Slow = true,
 	Normal = true,
@@ -91,6 +95,40 @@ local function canUseVoice(player)
 	return success and enabled == true
 end
 
+local function countryCodeToFlag(countryCode)
+	if typeof(countryCode) ~= "string" then
+		return DEFAULT_COUNTRY_FLAG
+	end
+
+	local normalizedCode = string.upper(countryCode)
+	if not string.match(normalizedCode, "^[A-Z][A-Z]$") then
+		return DEFAULT_COUNTRY_FLAG
+	end
+
+	return utf8.char(
+		string.byte(normalizedCode, 1) + REGIONAL_INDICATOR_OFFSET,
+		string.byte(normalizedCode, 2) + REGIONAL_INDICATOR_OFFSET
+	)
+end
+
+local function getCountryFlag(player)
+	local cachedFlag = playerCountryFlags[player]
+	if cachedFlag then
+		return cachedFlag
+	end
+
+	local success, countryCode = pcall(function()
+		return LocalizationService:GetCountryRegionForPlayerAsync(player)
+	end)
+	local countryFlag = if success then countryCodeToFlag(countryCode) else DEFAULT_COUNTRY_FLAG
+	playerCountryFlags[player] = countryFlag
+	return countryFlag
+end
+
+local function formatRoomName(ownerName, countryFlag)
+	return `{ownerName}'s Room {countryFlag}`
+end
+
 local function joinFailure(errorCode)
 	return {
 		Success = false,
@@ -116,7 +154,7 @@ local function updateRoomCount(room)
 	end
 end
 
-local function addMember(room, player)
+local function addMember(room, player, countryFlag)
 	local members = room:WaitForChild("Members")
 	if members:FindFirstChild(tostring(player.UserId)) then
 		return
@@ -126,6 +164,7 @@ local function addMember(room, player)
 	member.Name = tostring(player.UserId)
 	member:SetAttribute("UserId", player.UserId)
 	member:SetAttribute("Name", player.Name)
+	member:SetAttribute("CountryFlag", countryFlag or DEFAULT_COUNTRY_FLAG)
 	member:SetAttribute("IsOwner", room:GetAttribute("OwnerUserId") == player.UserId)
 	member.Parent = members
 	updateRoomCount(room)
@@ -146,7 +185,10 @@ local function leaveRoom(room, player)
 		newOwner:SetAttribute("IsOwner", true)
 		room:SetAttribute("OwnerUserId", newOwner:GetAttribute("UserId"))
 		room:SetAttribute("OwnerName", newOwner:GetAttribute("Name"))
-		room:SetAttribute("RoomName", `{newOwner:GetAttribute("Name")}'s Room`)
+		room:SetAttribute(
+			"RoomName",
+			formatRoomName(newOwner:GetAttribute("Name"), newOwner:GetAttribute("CountryFlag"))
+		)
 	end
 
 	updateRoomCount(room)
@@ -168,6 +210,7 @@ local function createRoom(player, settings)
 		return nil, "VoiceRequired"
 	end
 
+	local countryFlag = getCountryFlag(player)
 	leaveAllRooms(player)
 	nextRoomId += 1
 
@@ -177,7 +220,7 @@ local function createRoom(player, settings)
 	room.Name = `Room_{nextRoomId}`
 	room:SetAttribute("OwnerUserId", player.UserId)
 	room:SetAttribute("OwnerName", player.Name)
-	room:SetAttribute("RoomName", `{player.Name}'s Room`)
+	room:SetAttribute("RoomName", formatRoomName(player.Name, countryFlag))
 	room:SetAttribute("CreatedOrder", nextRoomId)
 	room:SetAttribute("Capacity", getCapacity(capacityText))
 	room:SetAttribute("CurrentPlayers", 1)
@@ -186,6 +229,7 @@ local function createRoom(player, settings)
 	room:SetAttribute("Speed", getSpeed(settings))
 	room:SetAttribute("PasswordEnabled", passwordEnabled)
 	room:SetAttribute("VoiceOnly", voiceOnly)
+	room:SetAttribute("Starting", false)
 	roomPasswords[room] = if passwordEnabled then getString(settings, "CreateRoomPassword", "") else nil
 	room.Destroying:Connect(function()
 		roomPasswords[room] = nil
@@ -194,7 +238,7 @@ local function createRoom(player, settings)
 	members.Name = "Members"
 	members.Parent = room
 	room.Parent = roomsFolder
-	addMember(room, player)
+	addMember(room, player, countryFlag)
 
 	return room.Name
 end
@@ -209,6 +253,9 @@ joinRoomFunction.OnServerInvoke = function(player, roomName, password)
 
 	local room = roomsFolder:FindFirstChild(roomName)
 	if not room then
+		return joinFailure("RoomUnavailable")
+	end
+	if room:GetAttribute("Starting") == true then
 		return joinFailure("RoomUnavailable")
 	end
 
@@ -234,6 +281,7 @@ joinRoomFunction.OnServerInvoke = function(player, roomName, password)
 		return joinFailure("VoiceRequired")
 	end
 
+	local countryFlag = getCountryFlag(player)
 	if room.Parent ~= roomsFolder or room:FindFirstChild("Members") ~= members then
 		return joinFailure("RoomUnavailable")
 	end
@@ -243,13 +291,13 @@ joinRoomFunction.OnServerInvoke = function(player, roomName, password)
 	end
 
 	leaveAllRooms(player)
-	addMember(room, player)
+	addMember(room, player, countryFlag)
 	return joinSuccess(room)
 end
 
 leaveRoomEvent.OnServerEvent:Connect(function(player, roomName)
 	local room = roomsFolder:FindFirstChild(roomName)
-	if room then
+	if room and room:GetAttribute("Starting") ~= true then
 		leaveRoom(room, player)
 	end
 end)
@@ -277,7 +325,11 @@ startRoomEvent.OnServerEvent:Connect(function(player, roomName)
 	end
 
 	local debugFilled = player.Name == "TildStudio" and room:GetAttribute("DebugFillUserId") == player.UserId
-	if room:GetAttribute("OwnerUserId") ~= player.UserId or (#members:GetChildren() < 3 and not debugFilled) then
+	if
+		room:GetAttribute("Starting") == true
+		or room:GetAttribute("OwnerUserId") ~= player.UserId
+		or (#members:GetChildren() < 3 and not debugFilled)
+	then
 		return
 	end
 
@@ -312,13 +364,21 @@ startRoomEvent.OnServerEvent:Connect(function(player, roomName)
 		VoiceOnly = room:GetAttribute("VoiceOnly"),
 		OwnerUserId = room:GetAttribute("OwnerUserId"),
 		Members = memberData,
+		DebugForceThreePlayers = debugFilled,
 	}
 
 	print(
 		`Starting room "{teleportData.RoomName}" | players {#players}/{teleportData.Capacity} ({table.concat(memberNames, ", ")}) | round={teleportData.Round}, theme={teleportData.Theme}, speed={teleportData.Speed}, voiceOnly={teleportData.VoiceOnly}`
 	)
 
-	TeleportService:TeleportPartyAsync(GAME_PLACE_ID, players, teleportData)
+	room:SetAttribute("Starting", true)
+	local teleportSucceeded, teleportError = pcall(function()
+		TeleportService:TeleportPartyAsync(GAME_PLACE_ID, players, teleportData)
+	end)
+	if not teleportSucceeded and room.Parent == roomsFolder then
+		room:SetAttribute("Starting", false)
+		warn("[LobbyRooms] Failed to start room", room.Name, teleportError)
+	end
 end)
 
 Players.PlayerRemoving:Connect(function(player)

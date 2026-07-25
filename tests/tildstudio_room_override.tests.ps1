@@ -22,6 +22,7 @@ foreach ($required in @(
 	'local debugFilled = player.Name == "TildStudio"',
 	'#members:GetChildren() < 3 and not debugFilled',
 	'#players < 3 and not debugFilled',
+	'DebugForceThreePlayers = debugFilled',
 	'LobbyPlaceId = game.PlaceId'
 )) {
 	if (-not $server.Contains($required)) {

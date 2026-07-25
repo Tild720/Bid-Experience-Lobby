@@ -74,6 +74,8 @@ foreach ($required in @(
 	'local SHOP_CARD_STAGGER = 0.05',
 	'task.delay((index - 1) * SHOP_CARD_STAGGER',
 	'CFrame.lookAt(Vector3.new(0, 0, -4), Vector3.zero)',
+	'item.ModelName == "FutureSign"',
+	'CFrame.Angles(0, math.rad(90), 0)',
 	'trailImage.Image = trailObject.Texture',
 	'colorGradient.Color = trailObject.Color',
 	'trailObject.Texture == ""',
@@ -162,12 +164,39 @@ if (
 	throw "Room alerts must use the same faster auto-fade and 0.3 background transparency"
 }
 
+$roomOverlayFunction = [regex]::Match(
+	$client,
+	'local function isRoomOverlay\(instance\)[\s\S]*?local function setRoomPanelTransparency'
+).Value
+if ($roomOverlayFunction -notmatch 'instance:IsDescendantOf\(roomAlert\)') {
+	throw "Room panel fades must not overwrite the Alert UIStroke transparency"
+}
+
 $pendingReset = $client.IndexOf('purchasePending = false', $client.IndexOf('purchaseFunction:InvokeServer'))
 $staleResponseGuard = $client.IndexOf('if requestGeneration ~= shopCategoryGeneration', $pendingReset)
 $safeRestoreGuard = $client.IndexOf('if not shopCategoryClosing and activeShopCategory', $pendingReset)
 $interactableRestore = $client.IndexOf('selectedShopCard:WaitForChild("Button").Interactable = true', $safeRestoreGuard)
 if ($pendingReset -lt 0 -or $staleResponseGuard -lt 0 -or $safeRestoreGuard -lt 0 -or $interactableRestore -lt 0 -or $safeRestoreGuard -gt $staleResponseGuard) {
 	throw "The current selected card must be re-enabled before discarding a stale shop response"
+}
+
+$purchaseHandler = [regex]::Match(
+	$client,
+	'actionButton\.Activated:Connect\(function\(\)[\s\S]*?\n\tend\)\nend'
+).Value
+$insufficientFundsBranch = $purchaseHandler.IndexOf('if result.Status == "InsufficientFunds" then')
+if ($insufficientFundsBranch -lt 0) {
+	throw "InsufficientFunds must open PlusMoney before the generic purchase Alert branch"
+}
+
+$openMoneyShopCall = $purchaseHandler.IndexOf('openMoneyShop()', $insufficientFundsBranch)
+$genericAlert = $purchaseHandler.IndexOf('showShopAlert(result.Message', $insufficientFundsBranch)
+if (
+	$openMoneyShopCall -lt 0 -or
+	$genericAlert -lt 0 -or
+	$openMoneyShopCall -gt $genericAlert
+) {
+	throw "InsufficientFunds must open PlusMoney before the generic purchase Alert branch"
 }
 
 Write-Output "shop purchase regression checks passed"

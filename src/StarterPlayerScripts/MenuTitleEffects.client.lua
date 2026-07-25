@@ -32,6 +32,7 @@ local moneyProductButtons = {
 	{ button = shopFrame:WaitForChild("20000P"), productId = 3611489343 },
 }
 local modules = ReplicatedStorage:WaitForChild("Modules")
+local playNamedSound = require(modules:WaitForChild("MenuSounds"))(mainGui)
 local signSkinConfig = require(modules:WaitForChild("SignSkinConfig"))
 local trailConfig = require(modules:WaitForChild("TrailConfig"))
 local signSkinsFolder = ReplicatedStorage:WaitForChild("SignSkins")
@@ -58,6 +59,7 @@ local menuButtonResetters = {}
 local menuClosing = false
 local playPanelClosing = false
 local shopClosing = false
+local isKoreanLocale = string.match(string.lower(game:GetService("LocalizationService").RobloxLocaleId), "^ko") ~= nil
 local CLICK_SCALE_DOWN_TIME = 0.06
 local CLICK_SCALE_UP_TIME = 0.08
 local CLICK_FADE_PROGRESS = 0.7
@@ -564,6 +566,22 @@ local roomStartFrame = roomStart:FindFirstChild("Frame")
 local roomDesc = roomFrame:FindFirstChild("Desc")
 local roomAlert = roomFrame:WaitForChild("Alert")
 local roomAlertStroke = roomAlert:WaitForChild("UIStroke")
+local roomPasswordTexts = {}
+for _, instance in roomFrame:GetDescendants() do
+	if
+		(instance:IsA("TextLabel") or instance:IsA("TextButton") or instance:IsA("TextBox"))
+		and instance ~= roomAlert
+		and not instance:IsDescendantOf(roomAlert)
+	then
+		local nameContainsPassword = string.find(string.lower(instance.Name), "password", 1, true) ~= nil
+		local text = string.lower(instance.Text)
+		local textContainsPassword = string.find(text, "password", 1, true) ~= nil
+			or string.find(text, "비밀번호", 1, true) ~= nil
+		if nameContainsPassword or textContainsPassword then
+			table.insert(roomPasswordTexts, instance)
+		end
+	end
+end
 local roomPassword = roomPanel:WaitForChild("Password")
 local roomPasswordScale = roomPassword:WaitForChild("UIScale")
 local roomPasswordTextBox = roomPassword:WaitForChild("TextBox")
@@ -574,6 +592,8 @@ local roomCards = {}
 local roomCardsTransparency = 1
 local currentRoom
 local pendingPasswordRoom
+local passwordPromptGeneration = 0
+local passwordPromptTween
 local roomAlertGeneration = 0
 local roomConnections = {}
 local tweenRoomCardsTransparency
@@ -584,7 +604,11 @@ local JOIN_ERROR_MESSAGES = {
 	RoomUnavailable = "This room is no longer available.",
 }
 roomPasswordScale.Scale = 0
+roomPassword.Visible = false
 roomPasswordEnter.Interactable = false
+for _, passwordText in roomPasswordTexts do
+	passwordText.Visible = false
+end
 roomAlert.BackgroundTransparency = 1
 roomAlert.TextTransparency = 1
 roomAlertStroke.Transparency = 1
@@ -676,12 +700,18 @@ end
 
 setCreateRoomOuterTransparency(1)
 
-createRoomSettings.CreateRoomPasswordEnabled = false
-createRoomSettings.CreateRoomPassword = ""
 createRoomSettings.CreateRoomVoiceOnly = false
-createRoomPasswordLabel.Text = "X"
-createRoomPasswordTextBox.Visible = false
 createRoomVoiceOnlyLabel.Text = "X"
+
+local function resetCreateRoomPassword()
+	createRoomSettings.CreateRoomPasswordEnabled = false
+	createRoomSettings.CreateRoomPassword = ""
+	createRoomPasswordLabel.Text = "X"
+	createRoomPasswordTextBox.Text = ""
+	createRoomPasswordTextBox.Visible = false
+end
+
+resetCreateRoomPassword()
 
 createRoomPassword.Activated:Connect(function()
 	local isEnabled = not createRoomSettings.CreateRoomPasswordEnabled
@@ -720,6 +750,11 @@ local function updateRoomCard(room, card)
 	setText(card, "RoomName", room:GetAttribute("RoomName") or "Room")
 	setText(card, "Setup", getRoomSetup(room))
 	setText(card, "Count", `{room:GetAttribute("CurrentPlayers") or 0}/{room:GetAttribute("Capacity") or 0}`)
+	local ownerUserId = room:GetAttribute("OwnerUserId")
+	local icon = card:FindFirstChild("Icon", true)
+	if icon and (icon:IsA("ImageLabel") or icon:IsA("ImageButton")) and ownerUserId then
+		icon.Image = `rbxthumb://type=AvatarHeadShot&id={ownerUserId}&w=420&h=420`
+	end
 
 	local locked = card:FindFirstChild("Locked", true)
 	if locked and locked:IsA("GuiObject") then
@@ -777,7 +812,9 @@ local function renderMembers(room)
 end
 
 local function getRoomStartReady(room)
-	return room:GetAttribute("OwnerUserId") == player.UserId and (room:GetAttribute("CurrentPlayers") or 0) >= 3
+	return room:GetAttribute("Starting") ~= true
+		and room:GetAttribute("OwnerUserId") == player.UserId
+		and (room:GetAttribute("CurrentPlayers") or 0) >= 3
 end
 
 local function setRoomStartTransparency(room, panelTransparency)
@@ -825,7 +862,10 @@ local function tweenRoomDescTransparency(room, panelTransparency)
 end
 
 local function isRoomOverlay(instance)
-	return instance == roomAlert or instance == roomPassword or instance:IsDescendantOf(roomPassword)
+	return instance == roomAlert
+		or instance:IsDescendantOf(roomAlert)
+		or instance == roomPassword
+		or instance:IsDescendantOf(roomPassword)
 end
 
 local function setRoomPanelTransparency(transparency)
@@ -882,6 +922,7 @@ local function tweenRoomPanelTransparency(transparency)
 	end
 
 	roomBack.Interactable = transparency < 1
+		and not (currentRoom and currentRoom:GetAttribute("Starting") == true)
 
 	local icon = roomFrame:FindFirstChild("Icon")
 	if icon and icon:IsA("ImageLabel") then
@@ -904,6 +945,24 @@ local function updateRoomPanel(room)
 	setText(roomPanel, "RoomName", room:GetAttribute("RoomName") or "Room")
 	setText(roomPanel, "Setup", getRoomSetup(room))
 	setText(roomPanel, "Count", `{room:GetAttribute("CurrentPlayers") or 0}/{room:GetAttribute("Capacity") or 0}`)
+	local isStarting = room:GetAttribute("Starting") == true
+	roomBack.Visible = not isStarting
+	roomBack.Interactable = not isStarting
+	local ownerUserId = room:GetAttribute("OwnerUserId")
+	local icon = roomFrame:FindFirstChild("Icon")
+	if icon and (icon:IsA("ImageLabel") or icon:IsA("ImageButton")) and ownerUserId then
+		icon.Image = `rbxthumb://type=AvatarHeadShot&id={ownerUserId}&w=420&h=420`
+	end
+	for _, passwordText in roomPasswordTexts do
+		passwordText.Visible = room:GetAttribute("PasswordEnabled") == true
+	end
+	local passwordText = roomFrame:FindFirstChild("Password")
+	if
+		passwordText
+		and (passwordText:IsA("TextLabel") or passwordText:IsA("TextButton") or passwordText:IsA("TextBox"))
+	then
+		passwordText.Text = `PASSWORD : {roomPanel:GetAttribute("CurrentPassword") or ""}`
+	end
 	tweenRoomStartTransparency(room, 0)
 	tweenRoomDescTransparency(room, 0)
 
@@ -969,7 +1028,36 @@ local function showRoomAlert(message)
 	end)
 end
 
+local function hidePasswordPrompt(shouldTween)
+	passwordPromptGeneration += 1
+	local generation = passwordPromptGeneration
+	if passwordPromptTween then
+		passwordPromptTween:Cancel()
+		passwordPromptTween = nil
+	end
+
+	roomPasswordEnter.Interactable = false
+	if shouldTween and roomPassword.Visible then
+		passwordPromptTween = tween(roomPasswordScale, { Scale = 0 })
+		passwordPromptTween.Completed:Once(function()
+			if generation == passwordPromptGeneration then
+				roomPassword.Visible = false
+				passwordPromptTween = nil
+			end
+		end)
+	else
+		roomPasswordScale.Scale = 0
+		roomPassword.Visible = false
+	end
+end
+
 local function showPasswordPrompt(room)
+	passwordPromptGeneration += 1
+	if passwordPromptTween then
+		passwordPromptTween:Cancel()
+		passwordPromptTween = nil
+	end
+
 	pendingPasswordRoom = room
 	currentRoom = nil
 	clearRoomConnections()
@@ -977,9 +1065,10 @@ local function showPasswordPrompt(room)
 	hideRoomAlert(false)
 	setRoomPanelTransparency(1)
 	roomPanel.Visible = true
+	roomPassword.Visible = true
 	roomPasswordTextBox.Text = ""
 	roomPasswordEnter.Interactable = true
-	tween(roomPasswordScale, { Scale = 1 })
+	passwordPromptTween = tween(roomPasswordScale, { Scale = 1 })
 
 	task.defer(function()
 		if pendingPasswordRoom == room then
@@ -992,8 +1081,7 @@ local function hideRoomPanel()
 	clearRoomConnections()
 	clearMemberCards()
 	pendingPasswordRoom = nil
-	roomPasswordEnter.Interactable = false
-	tween(roomPasswordScale, { Scale = 0 })
+	hidePasswordPrompt(true)
 	hideRoomAlert(true)
 	tweenRoomPanelTransparency(1)
 	roomBack.Interactable = false
@@ -1005,12 +1093,12 @@ local function hideRoomPanel()
 	end)
 end
 
-local function showRoomPanel(room)
+local function showRoomPanel(room, password)
 	pendingPasswordRoom = nil
-	roomPasswordEnter.Interactable = false
-	roomPasswordScale.Scale = 0
+	hidePasswordPrompt(false)
 	hideRoomAlert(false)
 	currentRoom = room
+	roomPanel:SetAttribute("CurrentPassword", password or "")
 	setRoomPanelTransparency(1)
 	roomPanel.Visible = true
 	roomBack.Interactable = true
@@ -1026,6 +1114,9 @@ local function showRoomPanel(room)
 
 	local members = room:WaitForChild("Members")
 	table.insert(roomConnections, members.ChildAdded:Connect(function(member)
+		if member:GetAttribute("UserId") ~= player.UserId then
+			playNamedSound("JoinRoom")
+		end
 		renderMembers(room)
 		table.insert(roomConnections, member.AttributeChanged:Connect(function()
 			renderMembers(room)
@@ -1050,7 +1141,8 @@ local function requestJoin(room, password)
 	if invoked and typeof(result) == "table" and result.Success == true and typeof(result.RoomName) == "string" then
 		local joinedRoom = roomsFolder:FindFirstChild(result.RoomName)
 		if joinedRoom then
-			showRoomPanel(joinedRoom)
+			playNamedSound("JoinRoom")
+			showRoomPanel(joinedRoom, password)
 			return
 		end
 	end
@@ -1063,8 +1155,7 @@ local function submitPassword()
 	local room = pendingPasswordRoom
 	local password = roomPasswordTextBox.Text
 	pendingPasswordRoom = nil
-	roomPasswordEnter.Interactable = false
-	tween(roomPasswordScale, { Scale = 0 })
+	hidePasswordPrompt(true)
 
 	if room then
 		requestJoin(room, password)
@@ -1185,8 +1276,7 @@ local function renderRoom(room)
 				showPasswordPrompt(room)
 			else
 				pendingPasswordRoom = nil
-				roomPasswordEnter.Interactable = false
-				tween(roomPasswordScale, { Scale = 0 })
+				hidePasswordPrompt(true)
 				requestJoin(room, nil)
 			end
 		end)
@@ -1221,8 +1311,7 @@ roomsFolder.ChildRemoved:Connect(function(room)
 		tweenRoomCardsTransparency(0)
 	elseif pendingPasswordRoom == room then
 		pendingPasswordRoom = nil
-		roomPasswordEnter.Interactable = false
-		tween(roomPasswordScale, { Scale = 0 })
+		hidePasswordPrompt(true)
 		showRoomAlert(JOIN_ERROR_MESSAGES.RoomUnavailable)
 	end
 end)
@@ -1429,7 +1518,7 @@ local function setupSignSkinPreview(card, item)
 		end
 	end
 	preview.Parent = worldModel
-	worldModel:PivotTo(CFrame.new())
+	worldModel:PivotTo(if item.ModelName == "FutureSign" then CFrame.Angles(0, math.rad(90), 0) else CFrame.new())
 
 	local camera = Instance.new("Camera")
 	camera.CFrame = CFrame.lookAt(Vector3.new(0, 0, -4), Vector3.zero)
@@ -1539,7 +1628,15 @@ local function createShopCard(categoryName, item, index, generation)
 		if not requestSucceeded or typeof(result) ~= "table" then
 			showShopAlert("Could not contact shop. Try again.")
 		else
+			if result.Status == "InsufficientFunds" then
+				openMoneyShop()
+				return
+			end
+
 			applyPurchaseResult(actionButton, result)
+			if result.Status == "Purchased" then
+				playNamedSound("Purchase")
+			end
 			if result.Status ~= "Equipped" and result.Status ~= "Unequipped" then
 				showShopAlert(result.Message or "Something went wrong. Try again.")
 			else
@@ -1625,6 +1722,7 @@ for _, product in moneyProductButtons do
 end
 
 purchaseAlert.OnClientEvent:Connect(function(message)
+	playNamedSound("Purchase")
 	showShopAlert(message)
 end)
 
@@ -1657,6 +1755,7 @@ local function addButtonEffects(button, hoverText, printText, onActivated)
 			return
 		end
 
+		normalText = button.Text
 		button.Text = hoverText
 		tweenScale(1.2)
 	end)
@@ -1700,11 +1799,13 @@ local function addButtonEffects(button, hoverText, printText, onActivated)
 	end)
 end
 
-addButtonEffects(playButton, "> Play", "Play", function()
+addButtonEffects(playButton, if isKoreanLocale then "> 플레이" else "> Play", "Play", function()
+	playNamedSound("FadeTransitionOnce")
 	revealPlayPanel()
 	tweenRoomCardsTransparency(0)
 end)
-addButtonEffects(shopButton, "> Shop", "Shop", function()
+addButtonEffects(shopButton, if isKoreanLocale then "> 상점" else "> Shop", "Shop", function()
+	playNamedSound("FadeTransitionOnce")
 	shopFrame.BackgroundTransparency = 1
 	shopScale.Scale = 1
 	for _, item in shopItems do
@@ -1722,12 +1823,15 @@ addButtonEffects(shopButton, "> Shop", "Shop", function()
 end)
 
 signSkin.Activated:Connect(function()
+	playNamedSound("FadeTransitionOnce")
 	openShopCategory("SignSkin")
 end)
 trail.Activated:Connect(function()
+	playNamedSound("FadeTransitionOnce")
 	openShopCategory("Trail")
 end)
 plusMoney.Activated:Connect(function()
+	playNamedSound("FadeTransitionOnce")
 	openMoneyShop()
 end)
 
@@ -1736,6 +1840,7 @@ shopBack.Activated:Connect(function()
 		return
 	end
 
+	playNamedSound("FadeTransitionOnce")
 	if activeShopCategory then
 		closeShopCategory()
 		return
@@ -1764,12 +1869,15 @@ shopBack.Activated:Connect(function()
 end)
 
 mainGui:WaitForChild("Play"):WaitForChild("CreateRoom").Activated:Connect(function()
+	playNamedSound("FadeTransitionOnce")
 	tweenRoomCardsTransparency(1)
 	hidePlayPanel()
+	resetCreateRoomPassword()
 	revealCreateRoomPanel()
 end)
 
 createRoomBack.Activated:Connect(function()
+	playNamedSound("FadeTransitionOnce")
 	hideCreateRoomPanel()
 	revealPlayPanel()
 	tweenRoomCardsTransparency(0)
@@ -1782,7 +1890,11 @@ createRoomCreate.Activated:Connect(function()
 	hideCreateRoomPanel()
 
 	if room then
-		showRoomPanel(room)
+		playNamedSound("GameStartAndCreateRoom")
+		showRoomPanel(
+			room,
+			if createRoomSettings.CreateRoomPasswordEnabled then createRoomSettings.CreateRoomPassword else nil
+		)
 	else
 		revealPlayPanel()
 		tweenRoomCardsTransparency(0)
@@ -1793,6 +1905,11 @@ createRoomCreate.Activated:Connect(function()
 end)
 
 roomBack.Activated:Connect(function()
+	if currentRoom and currentRoom:GetAttribute("Starting") == true then
+		return
+	end
+
+	playNamedSound("FadeTransitionOnce")
 	if currentRoom then
 		leaveRoomEvent:FireServer(currentRoom.Name)
 	end
@@ -1804,6 +1921,7 @@ end)
 
 roomStart.Activated:Connect(function()
 	if currentRoom then
+		playNamedSound("GameStartAndCreateRoom")
 		startRoomEvent:FireServer(currentRoom.Name)
 	end
 end)
@@ -1813,6 +1931,7 @@ mainGui:WaitForChild("Play"):WaitForChild("Back").Activated:Connect(function()
 		return
 	end
 
+	playNamedSound("FadeTransitionOnce")
 	playPanelClosing = true
 	tweenRoomCardsTransparency(1)
 	hidePlayPanel()
